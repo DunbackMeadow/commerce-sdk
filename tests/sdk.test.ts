@@ -1,0 +1,103 @@
+import { describe, expect, it, vi } from "vitest";
+import {
+  DunbackClient, DunbackApiError, verifyWebhook, signWebhookPayload,
+  toDunbackAttendees, buildCateringRequest, canOrderFood, DUNBACK_REGISTRATION_QUESTION, payOrderWithX402,
+} from "../src/index.js";
+
+const event = {
+  api_id: "evt-AbC123",
+  name: "Founders Dinner",
+  start_at: "2026-11-14T02:00:00Z",
+  timezone: "America/Los_Angeles",
+  geo_address_json: { address: "100 University Ave", city: "Palo Alto", region: "CA", postal_code: "94301", country_code: "us" },
+};
+const guests = [
+  { guest: { api_id: "g1", user_name: "Ana", user_email: "ana@x.com", approval_status: "approved", registration_answers: [{ question_id: DUNBACK_REGISTRATION_QUESTION.id, answer: "peanuts" }] } },
+  { guest: { api_id: "g2", user_name: "Ben", user_email: "ben@x.com", approval_status: "declined", registration_answers: [] } },
+  { api_id: "g3", name: "Cleo", phone_number: "+15551234567", approval_status: "approved", registration_answers: [{ label: "Dietary restrictions?", answer: ["vegetarian", "no dairy"] }] },
+];
+
+describe("luma helpers", () => {
+  it("maps attending guests and their allergy answers", () => {
+    const a = toDunbackAttendees(guests);
+    expect(a).toEqual([
+      { externalId: "g1", name: "Ana", allergies: "peanuts", email: "ana@x.com" },
+      { externalId: "g3", name: "Cleo", allergies: "vegetarian, no dairy", phone: "+15551234567" },
+    ]);
+  });
+
+  it("builds a catering request", () => {
+    const r = buildCateringRequest({
+      event, guests,
+      settings: { enabled: true, cuisine: "mexican" },
+      host: { name: "Sam", email: "sam@x.com", phone: "+15550000000" },
+    });
+    expect(r.partnerReference).toBe("luma:evt-AbC123");
+    expect(r.deliveryAddress).toMatchObject({ address1: "100 University Ave", zip: "94301", country: "US" });
+    expect(r.onsiteContact.phone).toBe("+15550000000");
+    expect(r.attendees).toHaveLength(2);
+  });
+
+  it("refuses online events and missing on-site phone", () => {
+    expect(() => buildCateringRequest({ event: { ...event, geo_address_json: null }, guests, settings: { enabled: true, cuisine: "thai" }, host: { name: "S", email: "s@x.com", phone: "1" } })).toThrow(/street address/);
+    expect(() => buildCateringRequest({ event, guests, settings: { enabled: true, cuisine: "thai" }, host: { name: "S", email: "s@x.com" } })).toThrow(/on-site contact/);
+  });
+
+  it("offers Order Food only after the guest list deadline", () => {
+    const s = { enabled: true, cuisine: "thai" as const, guestListDeadline: "2026-11-10T00:00:00Z" };
+    expect(canOrderFood(s, event, new Date("2026-11-09T00:00:00Z")).ok).toBe(false);
+    expect(canOrderFood(s, event, new Date("2026-11-11T00:00:00Z")).ok).toBe(true);
+    expect(canOrderFood(s, event, new Date("2026-11-15T00:00:00Z")).ok).toBe(false);
+  });
+});
+
+describe("webhooks", () => {
+  it("verifies a signed payload and rejects tampering/replays", () => {
+    const body = JSON.stringify({ id: "evt_1", type: "order.confirmed", created: 1, data: {} });
+    const sig = signWebhookPayload(body, "whsec_test");
+    expect(verifyWebhook(body, sig, "whsec_test").type).toBe("order.confirmed");
+    expect(() => verifyWebhook(body + " ", sig, "whsec_test")).toThrow(/Invalid/);
+    expect(() => verifyWebhook(body, sig, "whsec_test", { now: Date.now() + 3600_000 })).toThrow(/tolerance/);
+  });
+});
+
+describe("client", () => {
+  it("sends auth + idempotency headers and surfaces API errors", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify({ error: { code: "order_deadline_passed", message: "Too late" } }), { status: 409 });
+    });
+    const c = new DunbackClient({ apiKey: "dbk_test_luma_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", baseUrl: "https://example.test/v1", fetch: fetchMock as unknown as typeof fetch });
+    const err = await c.catering.select("creq_1", { optionId: "opt_1" }).catch((e) => e);
+    expect(err).toBeInstanceOf(DunbackApiError);
+    expect(err.code).toBe("order_deadline_passed");
+    const h = calls[0].init.headers as Record<string, string>;
+    expect(calls[0].url).toBe("https://example.test/v1/catering/requests/creq_1/select");
+    expect(h.Authorization).toMatch(/^Bearer dbk_test_/);
+    expect(h["Idempotency-Key"]).toBeTruthy();
+  });
+});
+
+describe("x402", () => {
+  it("answers the 402 challenge with a signed EIP-3009 authorization", async () => {
+    const accept = { scheme: "exact", network: "eip155:137", amount: "412380000", asset: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", payTo: "0x1111111111111111111111111111111111111111", maxTimeoutSeconds: 300, extra: { name: "USD Coin", version: "2" } };
+    let sent: any = null;
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const sig = (init.headers as Record<string, string> | undefined)?.["PAYMENT-SIGNATURE"];
+      if (!sig) return new Response(JSON.stringify({ accepts: [accept] }), { status: 402, headers: { "PAYMENT-REQUIRED": btoa(JSON.stringify({ accepts: [accept] })) } });
+      sent = JSON.parse(atob(sig));
+      return new Response(JSON.stringify({ id: "ord_1", status: "CONFIRMED" }), { status: 200 });
+    });
+    const signTypedData = vi.fn(async () => "0xsig");
+    const order = await payOrderWithX402(
+      { id: "ord_1", payment: { usdc: { x402Url: "https://example.test/x402?t=abc" } } as any },
+      { address: "0x2222222222222222222222222222222222222222", signTypedData },
+      { fetch: fetchMock as unknown as typeof fetch },
+    );
+    expect(order.status).toBe("CONFIRMED");
+    expect(sent.payload.authorization).toMatchObject({ to: accept.payTo, value: "412380000", from: "0x2222222222222222222222222222222222222222" });
+    expect(sent.payload.signature).toBe("0xsig");
+    await expect(payOrderWithX402({ id: "ord_1", payment: { usdc: { x402Url: "https://example.test/x" } } as any }, { address: "0x2", signTypedData }, { fetch: fetchMock as unknown as typeof fetch, maxAmountUsdc: 100 })).rejects.toThrow(/above your limit/);
+  });
+});
