@@ -34,20 +34,39 @@ You need Node 18 or later. React is optional and only needed for `@dunbackmeadow
 
 ## Credentials
 
-Dunback Meadow issues you three things:
+Get your credentials in the **Dunback Developer Dashboard**
+(<https://dunbackmeadow.com/developer>, or Menu → More… → Developer Dashboard
+in the Dunback app):
+
+1. Apply for developer access (individual or business). Dunback reviews it,
+   usually within 2 business days.
+2. Create an **app**. Each app has a **sandbox** and a **production** environment.
+3. In each environment, create the **API key** and set your **webhook URL**
+   and **allowed return hosts**.
 
 | What | Example | Where it lives |
 | --- | --- | --- |
-| API key | `dbk_live_luma_…` / `dbk_test_luma_…` | Your servers only. Never put it in a browser or a mobile app. |
-| Webhook secret | `whsec_…` | Your servers; used to verify `Dunback-Signature`. |
-| Allowed return hosts | `lu.ma` | Registered with Dunback; Stripe success and cancel URLs must be on these hosts. |
+| API key | `dbk_test_app-k3m9x2q7w4ze_…` / `dbk_live_app-k3m9x2q7w4ze_…` | Your servers only. Never put it in a browser or a mobile app. Shown once when created. |
+| Webhook signing secret | `whsec_…` | Your servers; used to verify `Dunback-Signature`. One per environment. |
+| Allowed return hosts | `lu.ma` | Set in the dashboard; Stripe success and cancel URLs must be on these hosts. |
 
-Test keys (`dbk_test_`) only work against the sandbox:
-`https://sandbox.dunbackmeadow.com/api/partner/v1`. In the sandbox:
+One key per app and environment at a time: to rotate, delete the key in the
+dashboard and create a new one. A deleted key stops working within a minute.
+
+The client picks the environment from the key:
+
+| Key | Base URL |
+| --- | --- |
+| `dbk_test_…` | `https://sandbox.dunbackmeadow.com/api/partner/v1` |
+| `dbk_live_…` | `https://dunbackmeadow.com/api/partner/v1` |
+
+In the sandbox:
 
 - Stripe runs in test mode.
 - Orders go to Dunback's test restaurants.
 - USDC payments use small real amounts on Polygon. There is no testnet USDC support yet.
+
+Check a key with `await dunback.me()`: it returns the app and environment.
 
 ## Quick start
 
@@ -65,9 +84,9 @@ const request = await dunback.catering.create({
   onsiteContact: { name: "Sam Host", phone: "+14155550100" },
   host: { name: "Sam Host", email: "sam@example.com" },
   attendees: [
-    { name: "Ana", email: "ana@example.com", allergies: "peanuts" },
+    { name: "Ana", email: "ana@example.com", allergies: "peanuts", allergyConsent: true },
     { name: "Ben", phone: "+14155550101", allergies: "" },
-    { name: "Cleo", dietaryPreferences: "vegetarian" },
+    { name: "Cleo", dietaryPreferences: "vegetarian", allergyConsent: true },
   ],
 });
 
@@ -160,6 +179,7 @@ app.post("/webhooks/dunback", express.raw({ type: "application/json" }), (req, r
 | --- | --- |
 | `catering.options_ready`, `catering.no_options`, `catering.failed` | CateringRequest |
 | `order.created`, `order.confirmed`, `order.payment_failed`, `order.expired`, `order.failed`, `order.needs_attention`, `order.cancelled` | Order |
+| `ping` | `{ object: "ping", appId, message }`: sent by **Send test event** in the dashboard |
 
 Each webhook is signed as `t=<unix>,v1=<HMAC-SHA256(secret, "<t>.<body>")>`.
 A non-2xx answer is retried after 1 s, 5 s and 25 s. Handle events
@@ -184,6 +204,16 @@ the option lists that guest in `unfedGuests` rather than guessing. Show those
 warnings to the host. Allergy-labelled portions are requested from the
 restaurant in the delivery note.
 
+**Consent.** Allergy and diet notes are health information, so each guest
+must agree to share theirs. Send `allergyConsent: true` for every guest whose
+`allergies` or `dietaryPreferences` says more than "none". Without it, the
+request fails with `400 allergy_consent_required`, and `details.guests` lists
+the guests concerned. `toDunbackAttendees()` sets `allergyConsent` for answers
+to `DUNBACK_REGISTRATION_QUESTION`, whose wording asks for that consent.
+
+**Retention.** Dunback deletes guest data 30 days after the event. Orders are
+kept longer for accounting, without guest names.
+
 ## React components (optional)
 
 ```tsx
@@ -194,6 +224,7 @@ These components only render data. Your backend makes every Dunback call.
 
 ## More
 
+- Developer Dashboard and documentation: <https://dunbackmeadow.com/developer>
 - [Luma integration guide](docs/LUMA_INTEGRATION_GUIDE.md)
 - [API reference](docs/API_REFERENCE.md)
 - [examples/luma-integration](examples/luma-integration): Express backend and host panel

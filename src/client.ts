@@ -1,19 +1,26 @@
 import { DunbackApiError } from "./errors.js";
 import type {
-  CateringRequest, CateringRequestInput, Cuisine, Order, SelectOptionInput,
+  AppInfo, CateringRequest, CateringRequestInput, Cuisine, Order, SelectOptionInput,
 } from "./types.js";
 
 export interface DunbackClientOptions {
-  /** `dbk_live_<partner>_...` or `dbk_test_<partner>_...`. Server-side only: never ship it to a browser. */
+  /**
+   * `dbk_test_<appId>_...` (sandbox) or `dbk_live_<appId>_...` (production), from
+   * the Developer Dashboard (https://dunbackmeadow.com/developer).
+   * Server-side only: never ship it to a browser.
+   */
   apiKey: string;
-  /** Default https://dunbackmeadow.com/api/partner/v1 */
+  /** Default: the sandbox for a `dbk_test_` key, production for a `dbk_live_` key. */
   baseUrl?: string;
   /** Per-request timeout, ms. Default 30 000. */
   timeoutMs?: number;
   fetch?: typeof fetch;
 }
 
-const DEFAULT_BASE_URL = "https://dunbackmeadow.com/api/partner/v1";
+export const DEFAULT_BASE_URL = "https://dunbackmeadow.com/api/partner/v1";
+export const SANDBOX_BASE_URL = "https://sandbox.dunbackmeadow.com/api/partner/v1";
+
+const KEY_RE = /^dbk_(live|test)_([a-z0-9-]{2,40})_[A-Za-z0-9_-]{32,}$/;
 
 function randomKey(): string {
   const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
@@ -26,21 +33,29 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * Server-side client for the Dunback Meadow Partner API.
  *
  *   const dunback = new DunbackClient({ apiKey: process.env.DUNBACK_API_KEY! });
+ *   await dunback.me();   // which app and environment the key belongs to
  *   const req = await dunback.catering.create({...});
  *   const ready = await dunback.catering.waitForOptions(req.id);
  *   const order = await dunback.catering.select(ready.id, { optionId: ready.options[0].id });
  *   // send order.payment.hostedPaymentUrl (or the Stripe / USDC links) to the payer
  */
 export class DunbackClient {
+  /** "test" (sandbox) or "live" (production), from the key. */
+  readonly mode: "live" | "test";
+  /** The app the key belongs to, from the key. */
+  readonly appId: string;
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
 
   constructor(opts: DunbackClientOptions) {
-    if (!opts?.apiKey || !/^dbk_(live|test)_/.test(opts.apiKey)) throw new Error("DunbackClient: a dbk_live_/dbk_test_ API key is required.");
-    this.apiKey = opts.apiKey;
-    this.baseUrl = (opts.baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
+    const parsed = KEY_RE.exec(String(opts?.apiKey || "").trim());
+    if (!parsed) throw new Error("DunbackClient: a dbk_live_/dbk_test_ API key is required. Create one in the Dunback Developer Dashboard.");
+    this.apiKey = parsed[0];
+    this.mode = parsed[1] as "live" | "test";
+    this.appId = parsed[2];
+    this.baseUrl = (opts.baseUrl || (this.mode === "test" ? SANDBOX_BASE_URL : DEFAULT_BASE_URL)).replace(/\/$/, "");
     this.timeoutMs = opts.timeoutMs ?? 30_000;
     this.fetchImpl = opts.fetch ?? globalThis.fetch;
     if (!this.fetchImpl) throw new Error("DunbackClient: global fetch is missing (Node 18+ required).");
@@ -74,6 +89,11 @@ export class DunbackClient {
       const err = json?.error || {};
       throw new DunbackApiError(res.status, err.code || `http_${res.status}`, err.message || text || res.statusText, err.details);
     }
+  }
+
+  /** The app and environment this key belongs to. Handy as a "is my key working?" check. */
+  async me(): Promise<AppInfo> {
+    return this.request<AppInfo>("GET", "/me");
   }
 
   /** Cuisines a host can pick when creating an event. */

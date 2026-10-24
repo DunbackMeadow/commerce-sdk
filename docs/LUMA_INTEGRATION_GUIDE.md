@@ -22,13 +22,19 @@ refunded automatically and Luma receives `order.failed`.
 
 ## 1. Setup
 
-1. **Credentials.** Dunback Meadow issues Luma:
-   - a test key (`dbk_test_luma_…`) for `https://sandbox.dunbackmeadow.com/api/partner/v1`
-   - a live key (`dbk_live_luma_…`) for `https://dunbackmeadow.com/api/partner/v1`
-   - a webhook secret (`whsec_…`) for each environment
-2. **Send Dunback:**
-   - Luma's webhook URL for each environment
-   - the hostnames that Stripe success and cancel URLs will use (for example `lu.ma`)
+1. **Credentials, from the Dunback Developer Dashboard**
+   (<https://dunbackmeadow.com/developer>). Luma's developer account applies
+   once as a business and is reviewed by Dunback. Then Luma creates an app
+   ("Luma event catering"), which has:
+   - a sandbox key (`dbk_test_app-…`) for `https://sandbox.dunbackmeadow.com/api/partner/v1`
+   - a production key (`dbk_live_app-…`) for `https://dunbackmeadow.com/api/partner/v1`
+   - a webhook signing secret (`whsec_…`) for each environment
+
+   Each key is shown once, when it's created. To rotate it, delete it in the
+   dashboard and create a new one.
+2. **Set in the dashboard, for each environment:**
+   - Luma's webhook URL (then click **Send test event**)
+   - the allowed return hosts for Stripe success and cancel URLs (for example `lu.ma`)
 3. **Install the SDK on Luma's servers:**
 
    ```bash
@@ -36,10 +42,8 @@ refunded automatically and Luma receives `order.failed`.
    ```
 
    ```ts
-   const dunback = new DunbackClient({
-     apiKey: process.env.DUNBACK_API_KEY!,
-     baseUrl: process.env.DUNBACK_BASE_URL,
-   });
+   // The key decides the environment: dbk_test_ -> sandbox, dbk_live_ -> production.
+   const dunback = new DunbackClient({ apiKey: process.env.DUNBACK_API_KEY! });
    ```
 
 > The API key gives full ordering power. Keep it server-side. Luma's frontend
@@ -85,14 +89,21 @@ import { DUNBACK_REGISTRATION_QUESTION } from "@dunbackmeadow/commerce-sdk";
 // { id: "dunback_food_allergies", label: "Food allergies or dietary needs", type: "long_text", required: false, ... }
 ```
 
-`toDunbackAttendees()` finds the answer in two ways: by
-`question_id === "dunback_food_allergies"`, or, if there is no match, by any
-question whose label mentions allergies or diet. Hosts who already ask about
-diet don't need a second question.
+**Consent.** Allergy and diet answers are health information, so Dunback only
+accepts them with the guest's consent. The question's description is that
+consent: _"By answering, you agree that Dunback Meadow and the restaurant may
+use your answer to prepare a safe meal for you."_ Keep this wording, or an
+equivalent that names Dunback Meadow and the restaurant, and show it next to
+the question.
 
-**Privacy notice for guests.** The question's description tells guests that
-their answer is shared with Dunback Meadow and the restaurant. Keep that text,
-or an equivalent, so guests know who receives their data.
+`toDunbackAttendees()` sends an answer to `dunback_food_allergies` with
+`allergyConsent: true`. If a host asks about allergies in their own question
+instead, that answer is **not** sent, because the guest didn't see Dunback's
+consent wording. Before ordering, call `guestsWithUnsharedAllergies(guests)`
+and show the host those names, for example: _"Ana and Ben noted allergies
+that Dunback can't check. Confirm their meals with them."_ If the host's own
+question has the consent wording too, pass `{ otherQuestionsHaveConsent: true }`
+to both helpers.
 
 ## 4. "Order Food via Dunback Meadow"
 
@@ -118,17 +129,20 @@ const request = await dunback.catering.create(input, {
 });
 ```
 
-What is sent per guest: name, email, phone and the allergy answer.
+What is sent per guest: name, and email and phone when Luma has them (both
+optional), plus the allergy answer when the guest consented.
 
 - The **restaurant never receives the guest list.** It receives:
   - the dishes and quantities
   - the delivery address and on-site contact, only after payment
   - a delivery note asking for allergy-labelled portions, which names the
     guests with allergies (for example "no peanut for Ana")
-- Dunback deletes guest data 30 days after the event.
+- Dunback deletes guest data 30 days after the event. Orders are kept longer
+  for accounting, without guest names.
 
 If Luma's guest model differs, build `attendees` yourself:
-`{ externalId, name, email?, phone?, allergies?, dietaryPreferences? }`.
+`{ externalId, name, email?, phone?, allergies?, dietaryPreferences?, allergyConsent? }`.
+Set `allergyConsent: true` only for guests who agreed to share their notes.
 
 ## 5. Showing the three options
 
@@ -222,6 +236,7 @@ After the deadline, the call fails with `cancel_refused`.
 
 - [ ] `listCuisines()` returns the sandbox restaurants
 - [ ] An event with 20 guests (3 with allergies) produces options whose `allergyCoverage` covers them
+- [ ] A guest who noted allergies only in a host's own question is listed by `guestsWithUnsharedAllergies`, and the host sees the warning
 - [ ] A guest whose allergy no dish can avoid appears in `unfedGuests`, and the warning is shown
 - [ ] Card payment with `4242 4242 4242 4242` leads to `order.confirmed`
 - [ ] A declined test card (`4000 0000 0000 0002`) keeps the order `AWAITING_PAYMENT`, and the host can retry

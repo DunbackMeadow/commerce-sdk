@@ -32,6 +32,13 @@ export interface Attendee {
   allergies?: string;
   /** Free text: "vegetarian", "halal", ... */
   dietaryPreferences?: string;
+  /**
+   * The guest agreed to share their allergy/diet notes with Dunback Meadow and
+   * the restaurant. Required (true) whenever `allergies` or
+   * `dietaryPreferences` says more than "none"; otherwise the request fails
+   * with `allergy_consent_required`.
+   */
+  allergyConsent?: boolean;
 }
 
 export interface CateringRequestInput {
@@ -214,12 +221,32 @@ export interface Order {
 export type WebhookEventType =
   | "catering.options_ready" | "catering.no_options" | "catering.failed"
   | "order.created" | "order.confirmed" | "order.payment_failed" | "order.expired"
-  | "order.failed" | "order.needs_attention" | "order.cancelled";
+  | "order.failed" | "order.needs_attention" | "order.cancelled"
+  | "ping";
 
-export interface WebhookEvent<T = CateringRequest | Order> {
+/** `data` of a `ping` event, sent by "Send test event" in the Developer Dashboard. */
+export interface PingData {
+  object: "ping";
+  appId: string;
+  message: string;
+}
+
+export interface WebhookEvent<T = CateringRequest | Order | PingData> {
   id: string;
   type: WebhookEventType;
   /** Unix seconds. */
   created: number;
+  /** Present on `ping`: true for a production endpoint. */
+  livemode?: boolean;
   data: T;
+}
+
+/** GET /me: the app and environment an API key belongs to. */
+export interface AppInfo {
+  object: "app";
+  id: string;
+  name: string;
+  mode: "live" | "test";
+  webhookUrl: string | null;
+  allowedReturnHosts: string[];
 }

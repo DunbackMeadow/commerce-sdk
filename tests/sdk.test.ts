@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  DunbackClient, DunbackApiError, verifyWebhook, signWebhookPayload,
-  toDunbackAttendees, buildCateringRequest, canOrderFood, DUNBACK_REGISTRATION_QUESTION, payOrderWithX402,
+  DunbackClient, DunbackApiError, verifyWebhook, signWebhookPayload, DEFAULT_BASE_URL, SANDBOX_BASE_URL,
+  toDunbackAttendees, guestsWithUnsharedAllergies, buildCateringRequest, canOrderFood, DUNBACK_REGISTRATION_QUESTION, payOrderWithX402,
 } from "../src/index.js";
 
 const event = {
@@ -21,9 +21,22 @@ describe("luma helpers", () => {
   it("maps attending guests and their allergy answers", () => {
     const a = toDunbackAttendees(guests);
     expect(a).toEqual([
-      { externalId: "g1", name: "Ana", allergies: "peanuts", email: "ana@x.com" },
-      { externalId: "g3", name: "Cleo", allergies: "vegetarian, no dairy", phone: "+15551234567" },
+      { externalId: "g1", name: "Ana", allergies: "peanuts", allergyConsent: true, email: "ana@x.com" },
+      // Cleo answered the host's own question, which has no consent wording.
+      { externalId: "g3", name: "Cleo", allergies: "", phone: "+15551234567" },
     ]);
+    expect(guestsWithUnsharedAllergies(guests)).toEqual(["Cleo"]);
+  });
+
+  it("sends answers to the host's own question when it has consent wording", () => {
+    const a = toDunbackAttendees(guests, { otherQuestionsHaveConsent: true });
+    expect(a[1]).toMatchObject({ name: "Cleo", allergies: "vegetarian, no dairy", allergyConsent: true });
+    expect(guestsWithUnsharedAllergies(guests, { otherQuestionsHaveConsent: true })).toEqual([]);
+  });
+
+  it("does not flag 'none' answers", () => {
+    const g = [{ api_id: "g9", name: "Dee", registration_answers: [{ question_id: DUNBACK_REGISTRATION_QUESTION.id, answer: "none" }] }];
+    expect(toDunbackAttendees(g)[0]).toEqual({ externalId: "g9", name: "Dee", allergies: "" });
   });
 
   it("builds a catering request", () => {
@@ -76,6 +89,35 @@ describe("client", () => {
     expect(calls[0].url).toBe("https://example.test/v1/catering/requests/creq_1/select");
     expect(h.Authorization).toMatch(/^Bearer dbk_test_/);
     expect(h["Idempotency-Key"]).toBeTruthy();
+  });
+
+  const secret = "x".repeat(43);
+
+  it("picks the environment from the key", () => {
+    const test = new DunbackClient({ apiKey: `dbk_test_app-k3m9x2q7w4ze_${secret}`, fetch: vi.fn() as unknown as typeof fetch });
+    expect(test.mode).toBe("test");
+    expect(test.appId).toBe("app-k3m9x2q7w4ze");
+    const live = new DunbackClient({ apiKey: `dbk_live_luma_${secret}`, fetch: vi.fn() as unknown as typeof fetch });
+    expect(live.mode).toBe("live");
+    expect(live.appId).toBe("luma");
+  });
+
+  it("defaults to the sandbox for test keys and production for live keys", async () => {
+    const urls: string[] = [];
+    const fetchMock = vi.fn(async (url: string) => {
+      urls.push(url);
+      return new Response(JSON.stringify({ object: "app", id: "app-k3m9x2q7w4ze", name: "Demo", mode: "test", webhookUrl: null, allowedReturnHosts: [] }), { status: 200 });
+    });
+    const f = fetchMock as unknown as typeof fetch;
+    const me = await new DunbackClient({ apiKey: `dbk_test_app-k3m9x2q7w4ze_${secret}`, fetch: f }).me();
+    await new DunbackClient({ apiKey: `dbk_live_app-k3m9x2q7w4ze_${secret}`, fetch: f }).me();
+    expect(urls).toEqual([`${SANDBOX_BASE_URL}/me`, `${DEFAULT_BASE_URL}/me`]);
+    expect(me.mode).toBe("test");
+  });
+
+  it("rejects malformed keys", () => {
+    expect(() => new DunbackClient({ apiKey: "sk_test_123" })).toThrow(/dbk_live_/);
+    expect(() => new DunbackClient({ apiKey: "dbk_test_app_short" })).toThrow(/Developer Dashboard/);
   });
 });
 

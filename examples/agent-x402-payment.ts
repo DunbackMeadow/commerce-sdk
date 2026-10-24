@@ -16,7 +16,11 @@ const request = await dunback.catering.create({
   deliveryAddress: { address1: "100 University Ave", city: "Palo Alto", state: "CA", zip: "94301" },
   onsiteContact: { name: "Front desk", phone: "+14155550100" },
   host: { name: "Ops Agent", email: "ops@example.com" },
-  attendees: [{ name: "Ana", allergies: "sesame" }, { name: "Ben" }, { name: "Cleo", dietaryPreferences: "vegan" }],
+  attendees: [
+    { name: "Ana", allergies: "sesame", allergyConsent: true },
+    { name: "Ben" },
+    { name: "Cleo", dietaryPreferences: "vegan", allergyConsent: true },
+  ],
 });
 
 const ready = await dunback.catering.waitForOptions(request.id);

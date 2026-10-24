@@ -8,7 +8,7 @@
 
 import express from "express";
 import {
-  DunbackClient, DunbackApiError, verifyWebhook, buildCateringRequest, canOrderFood,
+  DunbackClient, DunbackApiError, verifyWebhook, buildCateringRequest, canOrderFood, guestsWithUnsharedAllergies,
   DUNBACK_REGISTRATION_QUESTION, type DunbackEventSettings, type WebhookEvent, type Order, type CateringRequest,
 } from "@dunbackmeadow/commerce-sdk";
 
@@ -109,11 +109,13 @@ app.post("/api/events/:eventId/dunback/order-food", async (req, res) => {
   const gate = canOrderFood(settings, event);
   if (!gate.ok) return res.status(409).json({ code: "not_available", message: gate.reason });
   try {
-    const input = buildCateringRequest({ event, guests: await luma.getGuests(eventId), settings: settings!, host: await luma.getHost(eventId) });
+    const guests = await luma.getGuests(eventId);
+    const input = buildCateringRequest({ event, guests, settings: settings!, host: await luma.getHost(eventId) });
     // Same key for retries of the same click, so a double-click doesn't create two requests.
     const request = await dunback.catering.create(input, { idempotencyKey: `luma-${eventId}-${input.attendees.length}-${req.body?.clickId || ""}` });
     db.cateringRequest.set(eventId, request.id);
-    res.status(202).json(request); // UI polls GET /api/events/:eventId/dunback until status != COMPOSING
+    // Allergies noted outside Dunback's question weren't sent: the UI warns the host about these guests.
+    res.status(202).json({ ...request, guestsWithUnsharedAllergies: guestsWithUnsharedAllergies(guests) });
   } catch (e) { fail(res, e); }
 });
 

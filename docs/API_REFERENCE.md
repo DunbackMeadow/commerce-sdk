@@ -4,8 +4,18 @@
 | --- | --- |
 | Base URL | `https://dunbackmeadow.com/api/partner/v1` |
 | Sandbox | `https://sandbox.dunbackmeadow.com/api/partner/v1` |
-| Auth | `Authorization: Bearer dbk_live_<partner>_<secret>` (server-to-server only) |
+| Auth | `Authorization: Bearer dbk_live_<appId>_<secret>` (server-to-server only) |
+| Keys | Created per app and environment in the Developer Dashboard: <https://dunbackmeadow.com/developer> |
 | Format | JSON in and out. Money is in USD; USDC is 1:1. |
+
+Each environment accepts only its own keys: `dbk_test_` in the sandbox,
+`dbk_live_` in production. Anything else gets `401 wrong_environment`.
+
+| Status | code | Meaning |
+| --- | --- | --- |
+| 401 | `unauthorized` | Missing, malformed or deleted key |
+| 401 | `wrong_environment` | A key from the other environment |
+| 403 | `partner_disabled` | The app was deleted or the account isn't active |
 
 **Errors** use one shape:
 
@@ -17,6 +27,19 @@
 Replays return the original response with `Idempotent-Replayed: true`. Reusing a
 key with a different body returns `422 idempotency_mismatch`. Keys are kept for
 24 h.
+
+---
+
+## App
+
+### `GET /me`
+
+The app and environment the key belongs to.
+
+```json
+{ "object": "app", "id": "app-k3m9x2q7w4ze", "name": "Event catering", "mode": "test",
+  "webhookUrl": "https://api.example.com/webhooks/dunback", "allowedReturnHosts": ["example.com"] }
+```
 
 ---
 
@@ -52,7 +75,14 @@ Cuisine ids: `american`, `chinese`, `mexican`, `italian`, `japanese`,
 | `onsiteContact` | `{name, phone, email?}`, required | Receives the delivery |
 | `deliveryNotes` | string | |
 | `host` | `{name, email, phone?}`, required | |
-| `attendees[]` | 1–300, required | `{externalId?, name, email?, phone?, allergies?, dietaryPreferences?}` |
+| `attendees[]` | 1–300, required | `{externalId?, name, email?, phone?, allergies?, dietaryPreferences?, allergyConsent?}` |
+
+`email` and `phone` are optional for every guest. `allergyConsent: true` is
+required for each guest whose `allergies` or `dietaryPreferences` says more than
+"none": it records that the guest agreed to share those notes with Dunback and
+the restaurant. Otherwise the request fails with `400 allergy_consent_required`,
+and `error.details.guests` lists `{ index, externalId, name }` for each guest
+concerned.
 
 Composing usually takes 5–30 s. When it finishes, you receive the
 `catering.options_ready`, `catering.no_options` or `catering.failed` webhook.
@@ -217,3 +247,7 @@ The `Dunback-Signature: t=<unix>,v1=<hex>` header is
 | --- | --- |
 | `catering.options_ready`, `catering.no_options`, `catering.failed` | CateringRequest |
 | `order.created`, `order.confirmed`, `order.payment_failed`, `order.expired`, `order.failed`, `order.needs_attention`, `order.cancelled` | Order |
+| `ping` | `{ object: "ping", appId, message }`, plus top-level `livemode`. Sent by **Send test event** in the Developer Dashboard. |
+
+The webhook URL, its signing secret (reveal or roll) and the allowed return
+hosts are set per app and environment in the Developer Dashboard.

@@ -1,11 +1,12 @@
 export * from "./types.js";
 export * from "./errors.js";
-export { DunbackClient, type DunbackClientOptions } from "./client.js";
+export { DunbackClient, DEFAULT_BASE_URL, SANDBOX_BASE_URL, type DunbackClientOptions } from "./client.js";
 export { verifyWebhook, signWebhookPayload } from "./webhooks.js";
 export {
   DUNBACK_REGISTRATION_QUESTION,
   ATTENDING_STATUSES,
   toDunbackAttendees,
+  guestsWithUnsharedAllergies,
   toDunbackAddress,
   buildCateringRequest,
   canOrderFood,

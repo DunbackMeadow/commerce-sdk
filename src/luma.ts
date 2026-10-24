@@ -29,11 +29,15 @@ export interface DunbackEventSettings {
   onsiteContact?: { name: string; phone: string; email?: string };
 }
 
-/** The registration question to add to events with Dunback catering enabled. */
+/**
+ * The registration question to add to events with Dunback catering enabled.
+ * Its description is the guest's consent: answering it agrees to share the
+ * answer with Dunback and the restaurant, so keep that wording.
+ */
 export const DUNBACK_REGISTRATION_QUESTION = {
   id: "dunback_food_allergies",
   label: "Food allergies or dietary needs",
-  description: "Shared with Dunback Meadow and the restaurant so your meal is safe for you. Leave blank if none.",
+  description: "Optional. By answering, you agree that Dunback Meadow and the restaurant may use your answer to prepare a safe meal for you. Leave blank if none.",
   type: "long_text" as const,
   required: false,
   placeholder: "e.g. peanuts, shellfish, vegetarian, celiac",
@@ -82,24 +86,66 @@ function answerText(a: { answer?: unknown; value?: unknown }): string {
   return String(v);
 }
 
-/** Luma guests (raw get-guests entries or flat) -> Dunback attendees, attending guests only. */
-export function toDunbackAttendees(
-  guests: Array<LumaGuestLike | { guest: LumaGuestLike }>,
-  { questionId = DUNBACK_REGISTRATION_QUESTION.id, includeStatuses = ATTENDING_STATUSES }: { questionId?: string; includeStatuses?: Set<string> } = {},
-): Attendee[] {
+const NONE_RE = /^\s*(none|no|n\/a|na|nope|nothing|-|no allergies)\s*\.?\s*$/i;
+
+interface AttendeeOptions {
+  questionId?: string;
+  includeStatuses?: Set<string>;
+  /**
+   * Treat answers to the host's own allergy/diet questions (matched by label)
+   * as consent too. Only set this when that question also tells guests their
+   * answer is shared with Dunback Meadow and the restaurant. Default false.
+   */
+  otherQuestionsHaveConsent?: boolean;
+}
+
+function attendingGuests(guests: Array<LumaGuestLike | { guest: LumaGuestLike }>, includeStatuses: Set<string>): LumaGuestLike[] {
   return guests
     .map((g) => ("guest" in g && g.guest ? g.guest : (g as LumaGuestLike)))
-    .filter((g) => !g.approval_status || includeStatuses.has(String(g.approval_status).toLowerCase()))
-    .map((g) => {
-      const answers = g.registration_answers || [];
-      const allergy = answers.find((a) => a.question_id === questionId) || answers.find((a) => ALLERGY_LABEL_RE.test(a.label || ""));
-      const name = (g.user_name || g.name || g.user_email || g.email || "Guest").trim();
-      const a: Attendee = { externalId: g.api_id || g.id, name, allergies: allergy ? answerText(allergy).slice(0, 500) : "" };
-      const email = g.user_email || g.email;
-      if (email) a.email = email;
-      if (g.phone_number) a.phone = g.phone_number;
-      return a;
-    });
+    .filter((g) => !g.approval_status || includeStatuses.has(String(g.approval_status).toLowerCase()));
+}
+
+const guestName = (g: LumaGuestLike) => (g.user_name || g.name || g.user_email || g.email || "Guest").trim();
+
+/** The guest's allergy answer, and whether it came with consent to share it. */
+function allergyAnswer(g: LumaGuestLike, { questionId = DUNBACK_REGISTRATION_QUESTION.id, otherQuestionsHaveConsent = false }: AttendeeOptions) {
+  const answers = g.registration_answers || [];
+  const own = answers.find((a) => a.question_id === questionId);
+  if (own) return { text: answerText(own).slice(0, 500).trim(), consent: true };
+  const other = answers.find((a) => ALLERGY_LABEL_RE.test(a.label || ""));
+  return { text: other ? answerText(other).slice(0, 500).trim() : "", consent: otherQuestionsHaveConsent };
+}
+
+/**
+ * Luma guests (raw get-guests entries or flat) -> Dunback attendees, attending
+ * guests only. Allergy answers are sent only with the guest's consent: an
+ * answer to DUNBACK_REGISTRATION_QUESTION. See guestsWithUnsharedAllergies().
+ */
+export function toDunbackAttendees(guests: Array<LumaGuestLike | { guest: LumaGuestLike }>, options: AttendeeOptions = {}): Attendee[] {
+  return attendingGuests(guests, options.includeStatuses || ATTENDING_STATUSES).map((g) => {
+    const { text, consent } = allergyAnswer(g, options);
+    const shared = consent && text && !NONE_RE.test(text);
+    const a: Attendee = { externalId: g.api_id || g.id, name: guestName(g), allergies: shared ? text : "" };
+    if (shared) a.allergyConsent = true;
+    const email = g.user_email || g.email;
+    if (email) a.email = email;
+    if (g.phone_number) a.phone = g.phone_number;
+    return a;
+  });
+}
+
+/**
+ * Attending guests who noted allergies in a question without Dunback's consent
+ * wording, so toDunbackAttendees() left their notes out. Show these names to
+ * the host before ordering: their meals aren't checked against those allergies.
+ */
+export function guestsWithUnsharedAllergies(guests: Array<LumaGuestLike | { guest: LumaGuestLike }>, options: AttendeeOptions = {}): string[] {
+  return attendingGuests(guests, options.includeStatuses || ATTENDING_STATUSES)
+    .filter((g) => {
+      const { text, consent } = allergyAnswer(g, options);
+      return !consent && text && !NONE_RE.test(text);
+    })
+    .map(guestName);
 }
 
 /** Luma's geo_address_json -> Dunback address. Throws if the venue has no street address. */
