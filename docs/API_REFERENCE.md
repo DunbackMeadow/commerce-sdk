@@ -75,7 +75,7 @@ Cuisine ids: `american`, `chinese`, `mexican`, `italian`, `japanese`,
 | `onsiteContact` | `{name, phone, email?}`, required | Receives the delivery |
 | `deliveryNotes` | string | |
 | `host` | `{name, email, phone?}`, required | |
-| `attendees[]` | 1–300, required | `{externalId?, name, email?, phone?, allergies?, dietaryPreferences?, allergyConsent?}` |
+| `attendees[]` | 1–1000, required | `{externalId?, name, email?, phone?, allergies?, dietaryPreferences?, allergyConsent?}` |
 
 `email` and `phone` are optional for every guest. `allergyConsent: true` is
 required for each guest whose `allergies` or `dietaryPreferences` says more than
