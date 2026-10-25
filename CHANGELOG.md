@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased (API change, no SDK code change)
+
+- Catering requests accept up to 1000 guests (was 300). More fails with
+  `400 invalid_request`.
+- No per-dish quantity limit: an option lists each dish once with the full
+  quantity (`items[].quantity`), however many guests it feeds.
+
 ## 0.4.0
 
 - New `orders.updateDelivery(orderId, { deliveryAddress, onsiteContact?, deliveryNotes? })`

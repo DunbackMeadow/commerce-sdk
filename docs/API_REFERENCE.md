@@ -77,6 +77,8 @@ Cuisine ids: `american`, `chinese`, `mexican`, `italian`, `japanese`,
 | `host` | `{name, email, phone?}`, required | |
 | `attendees[]` | 1–1000, required | `{externalId?, name, email?, phone?, allergies?, dietaryPreferences?, allergyConsent?}` |
 
+A request may list up to 1000 guests; more fails with `400 invalid_request`.
+
 `email` and `phone` are optional for every guest. `allergyConsent: true` is
 required for each guest whose `allergies` or `dietaryPreferences` says more than
 "none": it records that the guest agreed to share those notes with Dunback and
@@ -121,7 +123,7 @@ Each option:
 | `title` | |
 | `strategy` | `favorites`, `value` or `variety` |
 | `restaurant` | `{ name, distanceMiles, imageUrl }` |
-| `items[]` | `{ name, description, imageUrl, role: "main"\|"drink"\|"extra", quantity, unitPrice, allergens, dietaryTags }` |
+| `items[]` | `{ name, description, imageUrl, role: "main"\|"drink"\|"extra", quantity, unitPrice, allergens, dietaryTags }`. Each dish appears once with its full quantity: Dunback has no per-dish limit. |
 | `allergyCoverage[]` | `{ constraint, guests, dishes }` |
 | `unfedGuests[]` | `{ constraint, guests: [names], what? }`: guests with no dish known to be safe |
 | `price` | See Price |
