@@ -182,6 +182,24 @@ export interface UsdcPaymentInstructions {
   x402Url?: string;
 }
 
+/** Where an order is delivered. `deliveryNotes` is your note only, without the catering and allergy text Dunback adds for the restaurant. */
+export interface OrderDelivery {
+  address: Required<Address>;
+  onsiteContact: { name: string; phone: string };
+  deliveryNotes: string;
+  /** True while the order is AWAITING_PAYMENT: the details can still be corrected (orders.updateDelivery). */
+  editable: boolean;
+}
+
+/** POST /orders/:id/delivery: correct the delivery details before payment. */
+export interface UpdateDeliveryInput {
+  deliveryAddress: Address;
+  /** Leave out to keep the current on-site contact. */
+  onsiteContact?: { name: string; phone: string };
+  /** Replaces the current note. Default "" (no note). */
+  deliveryNotes?: string;
+}
+
 export interface Order {
   id: string;
   object: "order";
@@ -194,6 +212,7 @@ export interface Order {
   deliveryDeadlineLocal: string;
   timeZone: string;
   guestCount: number;
+  delivery: OrderDelivery;
   items: CateringItem[];
   allergyCoverage: AllergyCoverage[];
   unfedGuests: UnfedGuests[];
@@ -222,6 +241,7 @@ export type WebhookEventType =
   | "catering.options_ready" | "catering.no_options" | "catering.failed"
   | "order.created" | "order.confirmed" | "order.payment_failed" | "order.expired"
   | "order.failed" | "order.needs_attention" | "order.cancelled"
+  | "order.delivery_updated"
   | "ping";
 
 /** `data` of a `ping` event, sent by "Send test event" in the Developer Dashboard. */

@@ -84,6 +84,12 @@ the restaurant. Otherwise the request fails with `400 allergy_consent_required`,
 and `error.details.guests` lists `{ index, externalId, name }` for each guest
 concerned.
 
+Dunback delivers only where it has launched. A delivery address outside the
+launched areas fails with `422 delivery_area_not_launched`; the message names
+the metro areas Dunback covers. Requests for more than 5 guests are checked
+against the areas launched for catering, smaller ones against the areas
+launched for individual delivery.
+
 Composing usually takes 5–30 s. When it finishes, you receive the
 `catering.options_ready`, `catering.no_options` or `catering.failed` webhook.
 
@@ -166,6 +172,7 @@ Errors:
 | `object` | `"order"` |
 | `status` | `AWAITING_PAYMENT`, `PAID`, `FULFILLING`, `CONFIRMED`, `EXPIRED`, `CANCELLED`, `REFUNDED`, `REFUND_PENDING` or `NEEDS_ATTENTION` |
 | `title`, `summary`, `restaurant`, `deliveryDeadlineLocal`, `timeZone`, `guestCount` | |
+| `delivery` | `{ address: {address1, address2, city, state, zip, country}, onsiteContact: {name, phone}, deliveryNotes, editable }`. `deliveryNotes` is your note only. `editable` is true while the order is `AWAITING_PAYMENT`. |
 | `items`, `allergyCoverage`, `unfedGuests`, `price` | Same shapes as the option |
 | `payment` | See below |
 | `fulfillment` | `{ restaurantOrderIds, providerPayment: { amount, payTo, txHash, verifiedOnChain, network }, confirmedAt }` |
@@ -209,6 +216,29 @@ hash. The call waits up to 60 s for the restaurant to confirm.
 | 400 | `payment_amount_short` |
 | 409 | `payment_already_used` |
 
+### `POST /orders/:id/delivery` → Order
+
+Corrects the delivery details before payment. The payer can do the same on the
+hosted payment page (`hostedPaymentUrl`).
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `deliveryAddress` | `{address1, address2?, city, state?, zip, country?}`, required | |
+| `onsiteContact` | `{name, phone}` | Leave out to keep the current contact |
+| `deliveryNotes` | string, up to 500 | Replaces the current note; default `""` |
+
+The price stays as quoted, so the correction is checked:
+
+| Status | code | Meaning |
+| --- | --- | --- |
+| 409 | `invalid_state` | The order isn't `AWAITING_PAYMENT` |
+| 422 | `delivery_area_not_launched` | Dunback doesn't deliver to that area yet |
+| 422 | `outside_delivery_area` | The restaurant doesn't deliver to that address |
+| 422 | `address_moved` | More than about a mile from the quoted address: create a new catering request |
+| 422 | `contact_incomplete` | A required field is missing |
+
+On success you also receive the `order.delivery_updated` webhook.
+
 ### `POST /orders/:id/cancel` `{ reason? }` → Order
 
 | Order status | Result |
@@ -246,7 +276,7 @@ The `Dunback-Signature: t=<unix>,v1=<hex>` header is
 | Event | `data` |
 | --- | --- |
 | `catering.options_ready`, `catering.no_options`, `catering.failed` | CateringRequest |
-| `order.created`, `order.confirmed`, `order.payment_failed`, `order.expired`, `order.failed`, `order.needs_attention`, `order.cancelled` | Order |
+| `order.created`, `order.confirmed`, `order.payment_failed`, `order.expired`, `order.failed`, `order.needs_attention`, `order.cancelled`, `order.delivery_updated` | Order |
 | `ping` | `{ object: "ping", appId, message }`, plus top-level `livemode`. Sent by **Send test event** in the Developer Dashboard. |
 
 The webhook URL, its signing secret (reveal or roll) and the allowed return

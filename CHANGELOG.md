@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0
+
+- New `orders.updateDelivery(orderId, { deliveryAddress, onsiteContact?, deliveryNotes? })`
+  (`POST /orders/:id/delivery`): correct the delivery details while the order
+  is `AWAITING_PAYMENT`. Fails with `422 address_moved`,
+  `outside_delivery_area` or `delivery_area_not_launched` when the address
+  can't be served at the quoted price.
+- `Order.delivery`: the delivery address, on-site contact, your delivery note
+  and whether they can still be edited (`OrderDelivery`).
+- New webhook event `order.delivery_updated`.
+- `catering.create` fails with `422 delivery_area_not_launched` for addresses
+  outside the areas where Dunback has launched delivery.
+
 ## 0.3.0
 
 - **Breaking:** guests with allergy or diet notes need `allergyConsent: true`.

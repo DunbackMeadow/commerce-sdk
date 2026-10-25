@@ -1,6 +1,6 @@
 import { DunbackApiError } from "./errors.js";
 import type {
-  AppInfo, CateringRequest, CateringRequestInput, Cuisine, Order, SelectOptionInput,
+  AppInfo, CateringRequest, CateringRequestInput, Cuisine, Order, SelectOptionInput, UpdateDeliveryInput,
 } from "./types.js";
 
 export interface DunbackClientOptions {
@@ -139,6 +139,18 @@ export class DunbackClient {
     /** Tell Dunback about a USDC transfer (optional: transfers of the exact amount are detected automatically). */
     confirmUsdcPayment: (orderId: string, txHash: string) =>
       this.request<Order>("POST", `/orders/${encodeURIComponent(orderId)}/usdc/confirm`, { txHash }, { timeoutMs: 90_000 }),
+
+    /**
+     * Corrects the delivery address, on-site contact and note while the order
+     * is AWAITING_PAYMENT (the payer can do the same on the hosted payment
+     * page). The price stays as quoted, so the new address must be in an area
+     * Dunback delivers to, inside the restaurant's delivery area and within
+     * about a mile of the original; otherwise it fails with 422
+     * `delivery_area_not_launched`, `outside_delivery_area` or `address_moved`
+     * (create a new catering request instead). Sends `order.delivery_updated`.
+     */
+    updateDelivery: (orderId: string, input: UpdateDeliveryInput) =>
+      this.request<Order>("POST", `/orders/${encodeURIComponent(orderId)}/delivery`, input),
 
     /** Unpaid orders: cancels the payment links. Confirmed orders: cancels at the restaurant (before its order deadline) and refunds. */
     cancel: (orderId: string, reason?: string) =>

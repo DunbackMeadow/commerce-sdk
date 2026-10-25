@@ -91,6 +91,26 @@ describe("client", () => {
     expect(h["Idempotency-Key"]).toBeTruthy();
   });
 
+  it("corrects an order's delivery details", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return calls.length === 1
+        ? new Response(JSON.stringify({ id: "ord_1", object: "order", status: "AWAITING_PAYMENT", delivery: { deliveryNotes: "Gate 4", editable: true } }), { status: 200 })
+        : new Response(JSON.stringify({ error: { code: "address_moved", message: "Too far from the quoted address" } }), { status: 422 });
+    });
+    const c = new DunbackClient({ apiKey: "dbk_test_luma_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", baseUrl: "https://example.test/v1", fetch: fetchMock as unknown as typeof fetch });
+    const input = { deliveryAddress: { address1: "120 University Ave", city: "Palo Alto", state: "CA", zip: "94301" }, deliveryNotes: "Gate 4" };
+    const o = await c.orders.updateDelivery("ord_1", input);
+    expect(calls[0].url).toBe("https://example.test/v1/orders/ord_1/delivery");
+    expect(calls[0].init.method).toBe("POST");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual(input);
+    expect(o.delivery.deliveryNotes).toBe("Gate 4");
+    const err = await c.orders.updateDelivery("ord_1", input).catch((e) => e);
+    expect(err).toBeInstanceOf(DunbackApiError);
+    expect(err.code).toBe("address_moved");
+  });
+
   const secret = "x".repeat(43);
 
   it("picks the environment from the key", () => {

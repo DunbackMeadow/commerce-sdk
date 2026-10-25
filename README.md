@@ -153,6 +153,27 @@ Payment problems come back as `DunbackApiError` with a `code` you can show to th
 Asynchronous card failures, such as a declined bank debit, arrive as the
 `order.payment_failed` webhook. `order.payment.lastError` holds the message.
 
+## Correcting the delivery address
+
+Until an order is paid, you (or the payer, on the hosted payment page) can
+correct the delivery address, on-site contact and note:
+
+```ts
+const updated = await dunback.orders.updateDelivery(order.id, {
+  deliveryAddress: { address1: "120 University Ave", address2: "Suite 300", city: "Palo Alto", state: "CA", zip: "94301" },
+  onsiteContact: { name: "Sam Lee", phone: "+15550000000" },
+  deliveryNotes: "Loading dock on Bryant St.", // replaces the current note
+});
+// updated.delivery shows the corrected details
+```
+
+The price stays as quoted, so the new address must stay within about a mile
+of the original and inside the restaurant's delivery area. Otherwise the call
+fails with `422 address_moved` or `outside_delivery_area`; create a new
+catering request instead. Addresses where Dunback hasn't launched delivery
+fail with `422 delivery_area_not_launched`, both here and when you create a
+catering request.
+
 ## Order lifecycle
 
 ```
@@ -178,7 +199,7 @@ app.post("/webhooks/dunback", express.raw({ type: "application/json" }), (req, r
 | Event | `data` |
 | --- | --- |
 | `catering.options_ready`, `catering.no_options`, `catering.failed` | CateringRequest |
-| `order.created`, `order.confirmed`, `order.payment_failed`, `order.expired`, `order.failed`, `order.needs_attention`, `order.cancelled` | Order |
+| `order.created`, `order.confirmed`, `order.payment_failed`, `order.expired`, `order.failed`, `order.needs_attention`, `order.cancelled`, `order.delivery_updated` | Order |
 | `ping` | `{ object: "ping", appId, message }`: sent by **Send test event** in the dashboard |
 
 Each webhook is signed as `t=<unix>,v1=<HMAC-SHA256(secret, "<t>.<body>")>`.
