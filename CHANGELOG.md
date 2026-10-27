@@ -1,11 +1,69 @@
 # Changelog
 
-## Unreleased (API change, no SDK code change)
+## Unreleased
 
+- Hosts see dollars, not USDC: `<PriceBreakdown>` shows "Card processing" and
+  "Total $50.45" by default, and USDC totals only with `paymentMethod="usdc"`
+  (for a host who chose USDC). `showCard` is deprecated (`showCard={false}`
+  means `paymentMethod="usdc"`). `<DunbackOrderStatus>` links to "Other payment
+  options" instead of "Pay with USDC or other options".
+- Service style: `serviceStyle: "buffet" | "meal_boxes"` on catering requests
+  (default `meal_boxes`), echoed on requests and options. Buffets use
+  restaurants' catering trays; meal boxes use single portions from any
+  restaurant that packs them. `listCuisines(venue, { serviceStyle })` counts per
+  style; `DunbackEventSettings.serviceStyle`, sent by `buildCateringRequest()`;
+  `<DunbackCateringSettings>` asks for it. New reason codes `no_buffet_dishes`
+  and `style_not_offered`.
+- Fix: `<CateringOptionsPicker>` and `<PriceBreakdown>` amounts lost their `$`
+  sign in an earlier unreleased change.
+- Restaurant catering policies. Restaurants can set the most guests they cater
+  for, a minimum order and free delivery over an amount; Dunback only offers
+  options that meet them.
+  - `listCuisines(venue, { guests })` / `cuisineCatalog(venue, { guests })`:
+    with the expected guest count, counts include only restaurants able to
+    cater that many (`GET /catalog/cuisines?guests=`). The catalog returns
+    `guests`.
+  - Options gain `restaurant.policies` (`minimumOrder`, `maxGuests`,
+    `freeDeliveryOver`) and `freeDeliveryShortfall`; items added to reach a
+    minimum have `addedForMinimum: true`; a waived delivery fee is a
+    `Free delivery` price line of 0 with a `note`.
+  - `unavailableReasons[]` gain a `code` (`party_too_large`,
+    `below_minimum_order`, ...).
+  - `DunbackEventSettings.expectedGuests`; `<DunbackCateringSettings>` asks
+    for it (turn off with `askExpectedGuests={false}`), and
+    `<CateringOptionsPicker>` shows free delivery and minimum top-ups.
+  - Advance notice by party size: `restaurant.policies.noticeTiers`, a
+    per-cuisine `noticeHours` (with `guests`), and the reason code
+    `notice_too_short`. `orderBy` already includes the notice.
+    `<DunbackCateringSettings>` shows how early to order.
+- Catering dishes: restaurants' trays and platters are used first. Such items
+  have `serves` (people per unit; `quantity` counts trays), shown as
+  "(serves 8 each)" by `<CateringOptionsPicker>`.
 - Catering requests accept up to 1000 guests (was 300). More fails with
-  `400 invalid_request`.
+  `400 invalid_request`. (API change)
 - No per-dish quantity limit: an option lists each dish once with the full
-  quantity (`items[].quantity`), however many guests it feeds.
+  quantity (`items[].quantity`), however many guests it feeds. (API change)
+- `<DunbackCateringSettings>`: cleaner layout (description under the title,
+  settings indented beneath it, labels above the fields). Checkboxes and inputs
+  now have explicit sizes, so a host page's global CSS such as
+  `input { width: 100% }` no longer pushes them out of line.
+- Cuisine availability near the venue: `listCuisines(venue?)` and the new
+  `cuisineCatalog(venue?)` (which also returns `scope` and the venue's `metro`)
+  pass the venue (`city`, `state`, `zip`) to `GET /catalog/cuisines`, which
+  then counts only restaurants in the venue's metro area. Without a venue,
+  counts stay platform-wide, as before.
+- New `toVenueLocation(geo_address_json)`: the venue for those calls, or
+  `null` until the host has entered a street address, city and ZIP.
+- `<DunbackCateringSettings>`: new `venueReady` and `metroName` props. With
+  `venueReady={false}` it shows no availability and asks the host to enter the
+  venue address first. Otherwise each cuisine shows its restaurant count, and
+  the ones without restaurants are disabled.
+- Restaurants' own cuisines: the catalog also lists cuisines restaurants
+  declared themselves, as `custom:<name>` ids (e.g. `custom:peruvian`, label
+  "Peruvian", `custom: true`), where at least one restaurant serves them.
+  `CuisineId` now accepts them (`StandardCuisineId | CustomCuisineId`), and so
+  does `catering.create({ cuisine })`. `<DunbackCateringSettings>` lists them
+  under "More cuisines near this venue".
 
 ## 0.4.0
 

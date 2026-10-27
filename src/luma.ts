@@ -13,14 +13,27 @@
  * pass whatever has the same field names, or map to `Attendee` yourself.
  */
 
-import type { Address, Attendee, CateringRequestInput, CuisineId } from "./types.js";
+import type { Address, Attendee, CateringRequestInput, CateringServiceStyle, CuisineId, VenueLocation } from "./types.js";
 
 /** Stored with a Luma event when the host enables Dunback catering. */
 export interface DunbackEventSettings {
   enabled: boolean;
   cuisine: CuisineId;
+  /**
+   * Buffet (trays to share) or individual meal boxes. Pass it to
+   * listCuisines(venue, { serviceStyle }) too: fewer restaurants offer buffets.
+   * Default "meal_boxes".
+   */
+  serviceStyle?: CateringServiceStyle;
   includeDrinks?: boolean;
   budgetPerGuest?: number;
+  /**
+   * The host's estimate of how many guests will attend (or the event's
+   * capacity). Pass it to listCuisines(venue, { guests }) so only cuisines
+   * with restaurants able to cater that many are offered. The order itself
+   * uses the real guest list.
+   */
+  expectedGuests?: number;
   /** When the host's guest list is final; "Order Food" is offered from then on. ISO 8601. */
   guestListDeadline?: string;
   /** Override the default (30 min before start). Venue-local "YYYY-MM-DDTHH:mm". */
@@ -162,6 +175,19 @@ export function toDunbackAddress(geo: LumaEventLike["geo_address_json"]): Addres
   };
 }
 
+/**
+ * The venue for listCuisines(venue), or null while the host hasn't entered a
+ * street address, city and ZIP yet (or for an online event). With null, show
+ * <DunbackCateringSettings venueReady={false}>, which asks for the address.
+ */
+export function toVenueLocation(geo: LumaEventLike["geo_address_json"]): VenueLocation | null {
+  const address = String(geo?.address ?? "").trim();
+  const city = String(geo?.city ?? "").trim();
+  const zip = String(geo?.postal_code ?? "").trim();
+  if (!address || !city || !zip) return null;
+  return { city, state: String(geo?.region ?? "").trim(), zip };
+}
+
 export interface BuildCateringRequestArgs {
   event: LumaEventLike;
   guests: Array<LumaGuestLike | { guest: LumaGuestLike }>;
@@ -189,6 +215,7 @@ export function buildCateringRequest(args: BuildCateringRequestArgs): CateringRe
     event: { name: event.name, startsAt: event.start_at, timeZone: event.timezone, ...(event.url ? { url: event.url } : {}) },
     ...(settings.deliveryDeadlineLocal ? { deliveryDeadlineLocal: settings.deliveryDeadlineLocal } : {}),
     cuisine: settings.cuisine,
+    serviceStyle: settings.serviceStyle ?? "meal_boxes",
     includeDrinks: settings.includeDrinks ?? true,
     ...(settings.budgetPerGuest ? { budgetPerGuest: settings.budgetPerGuest } : {}),
     deliveryAddress: args.deliveryAddress || toDunbackAddress(event.geo_address_json),

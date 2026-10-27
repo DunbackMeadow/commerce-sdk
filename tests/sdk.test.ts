@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   DunbackClient, DunbackApiError, verifyWebhook, signWebhookPayload, DEFAULT_BASE_URL, SANDBOX_BASE_URL,
   toDunbackAttendees, guestsWithUnsharedAllergies, buildCateringRequest, canOrderFood, DUNBACK_REGISTRATION_QUESTION, payOrderWithX402,
+  toVenueLocation,
 } from "../src/index.js";
 
 const event = {
@@ -49,6 +50,8 @@ describe("luma helpers", () => {
     expect(r.deliveryAddress).toMatchObject({ address1: "100 University Ave", zip: "94301", country: "US" });
     expect(r.onsiteContact.phone).toBe("+15550000000");
     expect(r.attendees).toHaveLength(2);
+    expect(r.serviceStyle).toBe("meal_boxes");
+    expect(buildCateringRequest({ event, guests, settings: { enabled: true, cuisine: "mexican", serviceStyle: "buffet" }, host: { name: "Sam", email: "sam@x.com", phone: "+15550000000" } }).serviceStyle).toBe("buffet");
   });
 
   it("refuses online events and missing on-site phone", () => {
@@ -109,6 +112,45 @@ describe("client", () => {
     const err = await c.orders.updateDelivery("ord_1", input).catch((e) => e);
     expect(err).toBeInstanceOf(DunbackApiError);
     expect(err.code).toBe("address_moved");
+  });
+
+  it("counts cuisines near a venue", async () => {
+    const urls: string[] = [];
+    const fetchMock = vi.fn(async (url: string) => {
+      urls.push(url);
+      return new Response(JSON.stringify(url.includes("?")
+        ? { object: "list", data: [{ id: "mexican", label: "Mexican", restaurants: 2 }], scope: "metro", metro: { id: "sf-bay-area", name: "San Francisco Bay Area" } }
+        : { object: "list", data: [{ id: "mexican", label: "Mexican", restaurants: 9 }] }), { status: 200 });
+    });
+    const c = new DunbackClient({ apiKey: "dbk_test_luma_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", baseUrl: "https://example.test/v1", fetch: fetchMock as unknown as typeof fetch });
+    const venue = toVenueLocation(event.geo_address_json);
+    expect(venue).toEqual({ city: "Palo Alto", state: "CA", zip: "94301" });
+    const near = await c.cuisineCatalog(venue);
+    expect(urls[0]).toBe("https://example.test/v1/catalog/cuisines?city=Palo+Alto&state=CA&zip=94301");
+    expect(near).toMatchObject({ scope: "metro", metro: { name: "San Francisco Bay Area" } });
+    expect(await c.listCuisines()).toEqual([{ id: "mexican", label: "Mexican", restaurants: 9 }]);
+    expect(urls[1]).toBe("https://example.test/v1/catalog/cuisines");
+    // No street address / ZIP yet, or an online event: no venue.
+    expect(toVenueLocation({ city: "Palo Alto", region: "CA" })).toBeNull();
+    expect(toVenueLocation(null)).toBeNull();
+  });
+
+  it("counts only restaurants that cater the expected guests", async () => {
+    const urls: string[] = [];
+    const fetchMock = vi.fn(async (url: string) => {
+      urls.push(url);
+      return new Response(JSON.stringify({ object: "list", data: [{ id: "thai", label: "Thai", restaurants: 1 }], scope: "metro", metro: { id: "sf-bay-area", name: "San Francisco Bay Area" }, guests: 120 }), { status: 200 });
+    });
+    const c = new DunbackClient({ apiKey: "dbk_test_luma_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", baseUrl: "https://example.test/v1", fetch: fetchMock as unknown as typeof fetch });
+    const catalog = await c.cuisineCatalog({ zip: "94301" }, { guests: 120 });
+    expect(urls[0]).toBe("https://example.test/v1/catalog/cuisines?zip=94301&guests=120");
+    expect(catalog).toMatchObject({ scope: "metro", guests: 120 });
+    await c.listCuisines(null, { guests: 8 });
+    expect(urls[1]).toBe("https://example.test/v1/catalog/cuisines?guests=8");
+    await expect(c.listCuisines(null, { guests: 2.5 })).rejects.toThrow(TypeError);
+    expect(urls).toHaveLength(2);
+    await c.cuisineCatalog({ zip: "94301" }, { guests: 40, serviceStyle: "buffet" });
+    expect(urls[2]).toBe("https://example.test/v1/catalog/cuisines?zip=94301&guests=40&serviceStyle=buffet");
   });
 
   const secret = "x".repeat(43);

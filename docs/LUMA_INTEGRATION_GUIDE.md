@@ -52,11 +52,38 @@ refunded automatically and Luma receives `order.failed`.
 ## 2. Event creation: enable catering and pick a cuisine
 
 ```ts
-// Backend: options for the picker. Cache for a few minutes.
-const cuisines = await dunback.listCuisines();
+// Backend: options for the picker, for the venue the host entered.
+// Cache for a few minutes per venue; ask again when the address changes.
+const venue = toVenueLocation(event.geo_address_json); // null until street, city and ZIP are in
+const { data: cuisines, metro } = await dunback.cuisineCatalog(venue, { guests: settings?.expectedGuests, serviceStyle: settings?.serviceStyle });
 // [{ id: "mexican", label: "Mexican", restaurants: 4 }, ...]
-// restaurants === 0 means no restaurant on Dunback serves that cuisine yet.
+// With a venue, `restaurants` counts restaurants in its metro area only;
+// 0 means none there serves that cuisine yet. metro: { id, name } or null.
+// With guests, only restaurants able to cater that many count: restaurants
+// may limit guests per order or require a minimum order.
 ```
+
+The host also chooses how food is served (`settings.serviceStyle`, asked by
+`<DunbackCateringSettings>`): a **buffet** (trays to share; only restaurants
+with catering trays) or **individual meal boxes** (one packed meal per guest;
+more dishes and usually more restaurants). `buildCateringRequest()` sends it.
+
+Pass the host's expected guest count (`settings.expectedGuests`, which
+`<DunbackCateringSettings>` asks for, or the event's capacity) and the style,
+and ask again when either changes. The real guest list is checked again when the host orders: if
+it grew past what the chosen cuisine's restaurants cater for, the request ends
+in `NO_OPTIONS` with `unavailableReasons[].code` `party_too_large`. Suggest
+another cuisine then.
+
+With `guests`, each cuisine also has `noticeHours`: restaurants can need more
+advance notice for bigger parties (say 72 hours for more than 50 guests). Set
+the event's `guestListDeadline` at least that long before delivery; ordering
+later ends in `NO_OPTIONS` with code `notice_too_short`.
+`<DunbackCateringSettings>` shows the notice under the cuisine.
+
+Frontend: `<DunbackCateringSettings cuisines={cuisines} venueReady={!!venue} metroName={metro?.name} … />`.
+While `venueReady` is false it shows no availability and asks the host to
+enter the venue address first.
 
 Save the host's choice with the event:
 
@@ -64,6 +91,7 @@ Save the host's choice with the event:
 type DunbackEventSettings = {
   enabled: boolean;
   cuisine: CuisineId; // "american" | "chinese" | "mexican" | ...
+  serviceStyle?: "buffet" | "meal_boxes"; // default "meal_boxes"
   includeDrinks?: boolean; // default true (non-alcoholic only)
   budgetPerGuest?: number; // USD; options above it are flagged, not hidden
   guestListDeadline?: string; // ISO; "Order Food" is offered from then on
@@ -167,6 +195,10 @@ Each option contains:
 | `price.totals.card` / `price.totals.usdc` | Totals for each payment method                                                                                          |
 | `price.perGuest`                          | Per-guest price                                                                                                         |
 | `withinBudget`                            | Present when the host set a budget                                                                                      |
+| `restaurant.policies`                     | The restaurant's `minimumOrder`, `maxGuests`, `freeDeliveryOver` (each `null` if none)                                  |
+| `freeDeliveryShortfall`                   | Food to add for free delivery, or `null`. A waived fee is a `Free delivery` price line of 0                            |
+| `items[].addedForMinimum`                 | A shared dish added to reach the restaurant's minimum order                                                             |
+| `items[].serves`                          | A catering tray: people one unit serves (`quantity` counts trays). Restaurants' catering dishes are used first        |
 | `orderBy`                                 | Last moment the restaurant can accept the order                                                                         |
 
 `<CateringOptionsPicker>` renders all of the above.

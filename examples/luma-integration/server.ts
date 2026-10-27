@@ -9,7 +9,7 @@
 import express from "express";
 import {
   DunbackClient, DunbackApiError, verifyWebhook, buildCateringRequest, canOrderFood, guestsWithUnsharedAllergies,
-  DUNBACK_REGISTRATION_QUESTION, type DunbackEventSettings, type WebhookEvent, type Order, type CateringRequest,
+  DUNBACK_REGISTRATION_QUESTION, toVenueLocation, type DunbackEventSettings, type WebhookEvent, type Order, type CateringRequest,
 } from "@dunbackmeadow/commerce-sdk";
 
 const dunback = new DunbackClient({ apiKey: process.env.DUNBACK_API_KEY!, baseUrl: process.env.DUNBACK_BASE_URL });
@@ -67,9 +67,12 @@ app.post("/webhooks/dunback", express.raw({ type: "application/json" }), async (
 
 app.use(express.json());
 
-// 1. Event creation: cuisines for the picker, then save the host's choice.
-app.get("/api/dunback/cuisines", async (_req, res) => {
-  try { res.json(await dunback.listCuisines()); } catch (e) { fail(res, e); }
+// 1. Event creation: cuisines for the picker (counted near the venue the host
+// typed), then save the host's choice. venueReady=false -> the picker asks for the address.
+app.get("/api/dunback/cuisines", async (req, res) => {
+  const q = req.query as Record<string, string | undefined>;
+  const venue = toVenueLocation({ address: q.address, city: q.city, region: q.state, postal_code: q.zip });
+  try { res.json({ ...(await dunback.cuisineCatalog(venue)), venueReady: !!venue }); } catch (e) { fail(res, e); }
 });
 
 app.put("/api/events/:eventId/dunback", async (req, res) => {

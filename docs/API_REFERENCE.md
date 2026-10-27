@@ -45,14 +45,44 @@ The app and environment the key belongs to.
 
 ## Catalog
 
-### `GET /catalog/cuisines`
+### `GET /catalog/cuisines?city=&state=&zip=&guests=&serviceStyle=`
+
+Pass the event venue (`zip`, or `city` + `state`) to count only restaurants in
+the venue's metro area, the ones that can cater there. Without it, counts
+cover the whole platform. Pass `guests` (expected guests, a whole number) to
+count only restaurants whose catering policies allow that many (and
+`serviceStyle` to count only those serving catering that way): most guests
+per order, and a minimum order that many guests are likely to reach. The
+response then includes `"guests"`, and each cuisine a `noticeHours`: the least
+advance notice one of its restaurants needs for that many guests (0: none;
+`null`: no restaurant). SDK: `listCuisines(venue?, { guests? })`,
+or `cuisineCatalog(venue?, { guests? })` for the metro too.
 
 ```json
-{ "object": "list", "data": [ { "id": "mexican", "label": "Mexican", "restaurants": 4 } ] }
+{
+  "object": "list",
+  "data": [
+    { "id": "mexican", "label": "Mexican", "restaurants": 4 },
+    { "id": "custom:peruvian", "label": "Peruvian", "restaurants": 1, "custom": true }
+  ],
+  "scope": "metro",
+  "metro": { "id": "sf-bay-area", "name": "San Francisco Bay Area" }
+}
 ```
 
-Cuisine ids: `american`, `chinese`, `mexican`, `italian`, `japanese`,
-`indian`, `thai`, `mediterranean`, `korean`, `vietnamese`.
+| Field | Notes |
+| --- | --- |
+| `scope` | `metro` with a venue, `platform` without |
+| `metro` | The venue's metro area. `null` without a venue, or when Dunback doesn't serve that area (then every count is 0) |
+
+Standard cuisine ids, always listed: `american`, `chinese`, `mexican`,
+`italian`, `japanese`, `indian`, `thai`, `mediterranean`, `korean`,
+`vietnamese`.
+
+Restaurants can also declare a cuisine of their own. Such cuisines are listed
+after the standard ones as `custom:<name>` (e.g. `custom:peruvian`, label
+"Peruvian", `custom: true`), and only where at least one restaurant in scope
+serves them. Hosts can pick them like any other: send the `id` as `cuisine`.
 
 ---
 
@@ -68,7 +98,8 @@ Cuisine ids: `american`, `chinese`, `mexican`, `italian`, `japanese`,
 | `event.timeZone` | IANA, required | Venue time zone |
 | `event.url` | URL | |
 | `deliveryDeadlineLocal` | `YYYY-MM-DDTHH:mm` | Default: `startsAt` minus 30 min, venue-local |
-| `cuisine` | cuisine id, required | |
+| `cuisine` | cuisine id, required | A standard id or a `custom:…` id from `/catalog/cuisines` |
+| `serviceStyle` | `buffet` or `meal_boxes` | How food is served. `buffet`: trays and platters to share, from restaurants with catering dishes. `meal_boxes`: one packed meal per guest from restaurants' regular dishes (more dishes, usually more restaurants). Default `meal_boxes`. |
 | `includeDrinks` | bool | Default true. Non-alcoholic only. |
 | `budgetPerGuest` | number | Flags options above it |
 | `deliveryAddress` | `{address1, address2?, city, state?, zip, country?}`, required | |
@@ -110,20 +141,49 @@ Composing usually takes 5–30 s. When it finishes, you receive the
 | `deliveryDeadlineLocal`, `timeZone`, `daypart` | |
 | `allergySummary` | `[{ constraint, guests: [names] }]` |
 | `options` | Up to 3; see below |
-| `unavailableReasons` | `[{ name, reason }]`, when `NO_OPTIONS` |
+| `unavailableReasons` | `[{ name, code, reason }]` when `NO_OPTIONS`. `code`: `party_too_large`, `below_minimum_order`, `notice_too_short`, `no_buffet_dishes`, `style_not_offered`, `outside_delivery_area`, `not_serving_then`, `different_cuisine` or `restaurant_declined` (more may be added) |
 | `orderId` | Set once an option is selected |
 | `error` | `{ code, message }`, when `FAILED` |
 | `createdAt`, `updatedAt` | |
 
 Each option:
 
+How the food is served is the host's choice (`serviceStyle`):
+
+- `buffet`: trays and platters guests share. Only restaurants with catering
+  dishes for mains take part; their trays come first, single portions only
+  fill in.
+- `meal_boxes` (default): one individually packed meal per guest, which
+  guests pick up themselves. Any restaurant's single portions qualify (no
+  trays), so there are more dishes to choose from and usually more
+  restaurants. A restaurant can opt out of packing meal boxes.
+
+Each option repeats its `serviceStyle`, and the restaurant's order says how to pack it.
+
+Restaurants may set their own catering policies: the most guests they cater
+for in one order, a minimum order (food subtotal), free delivery at or above a
+food subtotal, and advance notice by party size (e.g. more than 20 guests: 24
+hours, more than 50: 72 hours). Each is optional. Dunback only offers options
+that meet them: a restaurant that can't take the party, or needs more notice
+than is left, is left out; an option slightly under a restaurant's minimum gets
+shared sides or desserts added (`addedForMinimum`); `orderBy` is moved earlier
+to the notice the restaurant needs. Free delivery shows as a `Free delivery`
+price line of 0.
+
+Restaurants that specialize in catering list catering dishes: trays and
+platters that serve several people. Dunback composes with those first and adds
+single portions only where needed (guests no tray suits, or a few guests left
+over). Such an item has `serves`: `quantity` counts trays and `unitPrice` is
+per tray, so 2 trays with `serves: 8` feed 16 guests.
+
 | Field | Notes |
 | --- | --- |
 | `id` | `opt_1` … `opt_3` |
 | `title` | |
 | `strategy` | `favorites`, `value` or `variety` |
-| `restaurant` | `{ name, distanceMiles, imageUrl }` |
-| `items[]` | `{ name, description, imageUrl, role: "main"\|"drink"\|"extra", quantity, unitPrice, allergens, dietaryTags }`. Each dish appears once with its full quantity: Dunback has no per-dish limit. |
+| `restaurant` | `{ name, distanceMiles, imageUrl, policies: { minimumOrder, maxGuests, freeDeliveryOver, noticeTiers: [{ overGuests, hours }] } }`; each policy is `null` when the restaurant has none |
+| `freeDeliveryShortfall` | Food (USD) to add for the restaurant's free delivery; `null` when delivery is already free or there's no such policy |
+| `items[]` | `{ name, description, imageUrl, role: "main"\|"drink"\|"extra", quantity, unitPrice, allergens, dietaryTags, serves?, addedForMinimum? }`. Each dish appears once with its full quantity: Dunback has no per-dish limit. `serves`: a catering dish (tray) serving that many people per unit; `quantity` and `unitPrice` are then per tray. `addedForMinimum`: a shared dish added to reach the restaurant's minimum order. |
 | `allergyCoverage[]` | `{ constraint, guests, dishes }` |
 | `unfedGuests[]` | `{ constraint, guests: [names], what? }`: guests with no dish known to be safe |
 | `price` | See Price |

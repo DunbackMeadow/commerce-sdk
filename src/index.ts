@@ -8,6 +8,7 @@ export {
   toDunbackAttendees,
   guestsWithUnsharedAllergies,
   toDunbackAddress,
+  toVenueLocation,
   buildCateringRequest,
   canOrderFood,
   type DunbackEventSettings,

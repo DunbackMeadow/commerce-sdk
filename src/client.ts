@@ -1,6 +1,7 @@
 import { DunbackApiError } from "./errors.js";
 import type {
-  AppInfo, CateringRequest, CateringRequestInput, Cuisine, Order, SelectOptionInput, UpdateDeliveryInput,
+  AppInfo, CateringRequest, CateringRequestInput, Cuisine, CuisineCatalog, CuisineQuery, Order, SelectOptionInput, UpdateDeliveryInput,
+  VenueLocation,
 } from "./types.js";
 
 export interface DunbackClientOptions {
@@ -96,10 +97,37 @@ export class DunbackClient {
     return this.request<AppInfo>("GET", "/me");
   }
 
-  /** Cuisines a host can pick when creating an event. */
-  async listCuisines(): Promise<Cuisine[]> {
-    const r = await this.request<{ data: Cuisine[] }>("GET", "/catalog/cuisines");
-    return r.data;
+  /**
+   * Cuisines a host can pick when creating an event. Pass the venue to count
+   * only restaurants in its metro area (the ones that can cater there);
+   * without one, counts cover the whole platform. Pass `{ guests }` (expected
+   * guests) to count only restaurants able to cater that many: restaurants
+   * may limit guests per order or require a minimum order. See also
+   * cuisineCatalog().
+   */
+  async listCuisines(venue?: VenueLocation | null, query: CuisineQuery = {}): Promise<Cuisine[]> {
+    return (await this.cuisineCatalog(venue, query)).data;
+  }
+
+  /** listCuisines() plus which metro area the counts are for (`metro` is null when Dunback doesn't serve the venue's area). */
+  async cuisineCatalog(venue?: VenueLocation | null, query: CuisineQuery = {}): Promise<CuisineCatalog> {
+    const q = new URLSearchParams();
+    for (const k of ["city", "state", "zip"] as const) {
+      const v = String(venue?.[k] ?? "").trim();
+      if (v) q.set(k, v);
+    }
+    const hasVenue = q.toString() !== "";
+    if (query.guests != null) {
+      if (!Number.isInteger(query.guests) || query.guests < 1) throw new TypeError("guests must be a whole number, 1 or more");
+      q.set("guests", String(query.guests));
+    }
+    if (query.serviceStyle) q.set("serviceStyle", query.serviceStyle);
+    const qs = q.toString();
+    const r = await this.request<Partial<CuisineCatalog> & { data: Cuisine[] }>("GET", `/catalog/cuisines${qs ? `?${qs}` : ""}`);
+    return {
+      data: r.data, scope: r.scope ?? (hasVenue ? "metro" : "platform"), metro: r.metro ?? null,
+      guests: r.guests ?? query.guests ?? null, serviceStyle: r.serviceStyle ?? query.serviceStyle ?? null,
+    };
   }
 
   readonly catering = {
