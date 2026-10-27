@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
 - Hosts see dollars, not USDC: `<PriceBreakdown>` shows "Card processing" and
   "Total $50.45" by default, and USDC totals only with `paymentMethod="usdc"`
