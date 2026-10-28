@@ -196,12 +196,10 @@ per tray, so 2 trays with `serves: 8` feed 16 guests.
 | --- | --- |
 | `currency` | `"USD"` |
 | `lines[]` | `{ code, label, amount }`. `code` is `food`, `delivery`, `restaurant_fee`, `tax`, `platform_fee` or `service_fee`. |
-| `restaurantAmount` | What Dunback pays the restaurant |
-| `dunbackCommission` | |
-| `dunbackServiceFee` | |
+| `dunbackServiceFee` | The host's service fee: `serviceFeeRate` × food and drinks |
+| `serviceFeeRate` | Dunback's service fee rate on catering orders (`0.05` = 5%) |
 | `totals` | `{ usdc, card, cardProcessingFee }` |
 | `perGuest` | `{ usdc, card }` |
-| `commissionRate` | |
 
 The card total is the USDC total grossed up for card processing.
 

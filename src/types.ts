@@ -165,9 +165,10 @@ export interface PriceLine {
 export interface Price {
   currency: "USD";
   lines: PriceLine[];
-  restaurantAmount: number;
-  dunbackCommission: number;
+  /** The host's service fee: serviceFeeRate x food and drinks (the `service_fee` line). */
   dunbackServiceFee: number;
+  /** Dunback's service fee rate on catering orders (0.05 = 5%). */
+  serviceFeeRate: number;
   totals: {
     /** What a USDC payment must be. */
     usdc: number;
@@ -176,7 +177,6 @@ export interface Price {
     cardProcessingFee: number;
   };
   perGuest: { usdc: number; card: number };
-  commissionRate: number;
 }
 
 export interface CateringItem {

@@ -128,8 +128,9 @@ the question.
 `allergyConsent: true`. If a host asks about allergies in their own question
 instead, that answer is **not** sent, because the guest didn't see Dunback's
 consent wording. Before ordering, call `guestsWithUnsharedAllergies(guests)`
-and show the host those names, for example: _"Ana and Ben noted allergies
-that Dunback can't check. Confirm their meals with them."_ If the host's own
+and show the host those names in plain words, for example: _"These guests'
+allergy notes weren't shared with the restaurant based on their choice: Ana,
+Ben. Please check their meals."_ If the host's own
 question has the consent wording too, pass `{ otherQuestionsHaveConsent: true }`
 to both helpers.
 

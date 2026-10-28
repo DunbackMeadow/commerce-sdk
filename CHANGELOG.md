@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0
+
+- **Breaking:** prices no longer include `restaurantAmount`,
+  `dunbackCommission` or `commissionRate`. Dunback's commission is between
+  Dunback and the restaurant; prices show what the host pays.
+- Catering orders charge the host a service fee as a share of food and drinks
+  (5% by default) instead of a fixed fee. Prices gain `serviceFeeRate`; the
+  `service_fee` line reads "Dunback service fee (5%)".
+
 ## 0.5.0
 
 - Hosts see dollars, not USDC: `<PriceBreakdown>` shows "Card processing" and

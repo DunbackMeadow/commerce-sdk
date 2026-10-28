@@ -1,6 +1,6 @@
 {
   "name": "@dunbackmeadow/commerce-sdk",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Official Node.js/TypeScript SDK for the Dunback Meadow commerce API. Order from your app or agent and pay by card (Stripe) or USDC. Event catering is available now; more product types are coming.",
   "repository": {
     "type": "git",
