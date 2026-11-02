@@ -18,7 +18,9 @@ implementation is in [`examples/luma-integration`](../examples/luma-integration)
 
 If a payment fails, Luma receives `order.payment_failed` with a message to show
 the host. If the restaurant can't take the order after payment, the host is
-refunded automatically and Luma receives `order.failed`.
+refunded automatically and Luma receives `order.failed`. If a delivery is
+late, fails or is cancelled by the restaurant, the host is refunded in full
+automatically and Luma receives `order.refunded`.
 
 ## 1. Setup
 
@@ -253,6 +255,7 @@ app.post("/webhooks/dunback", express.raw({ type: "application/json" }), (req, r
 | `order.failed`           | Show the message. The host was refunded (`refund`).                        |
 | `order.needs_attention`  | Show "Dunback support is finishing your order". Dunback contacts the host. |
 | `order.cancelled`        | Show the cancellation and the refund                                       |
+| `order.refunded`         | A delivery was late, failed or was cancelled by the restaurant: show the refund (`refunds`) |
 
 ## 8. Cancellation
 
@@ -260,8 +263,13 @@ app.post("/webhooks/dunback", express.raw({ type: "application/json" }), (req, r
 
 - **Before payment:** the payment links are cancelled.
 - **After confirmation, before the restaurant's order deadline:** the order is
-  cancelled at the restaurant and the host is refunded. Card refunds are
-  automatic; USDC refunds are sent after review.
+  cancelled at the restaurant and the host is refunded the restaurant's part
+  of the order. Dunback's commission and service fee are kept, and so is the
+  card processing fee (Stripe keeps it). Card refunds are automatic; USDC
+  refunds are sent after review.
+
+If the host isn't at fault (a late or failed delivery, or the restaurant
+cancelled), everything they paid is refunded, card processing fee included.
 
 After the deadline, the call fails with `cancel_refused`.
 

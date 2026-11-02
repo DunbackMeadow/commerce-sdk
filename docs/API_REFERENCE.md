@@ -230,13 +230,14 @@ Errors:
 | --- | --- |
 | `id` | `ord_…` |
 | `object` | `"order"` |
-| `status` | `AWAITING_PAYMENT`, `PAID`, `FULFILLING`, `CONFIRMED`, `EXPIRED`, `CANCELLED`, `REFUNDED`, `REFUND_PENDING` or `NEEDS_ATTENTION` |
+| `status` | `AWAITING_PAYMENT`, `PAID`, `FULFILLING`, `CONFIRMED`, `EXPIRED`, `CANCELLED`, `REFUNDED`, `REFUND_PENDING` or `NEEDS_ATTENTION`. A `CONFIRMED` order becomes `REFUNDED` / `REFUND_PENDING` when all its deliveries failed (see Refunds) |
 | `title`, `summary`, `restaurant`, `deliveryDeadlineLocal`, `timeZone`, `guestCount` | |
 | `delivery` | `{ address: {address1, address2, city, state, zip, country}, onsiteContact: {name, phone}, deliveryNotes, editable }`. `deliveryNotes` is your note only. `editable` is true while the order is `AWAITING_PAYMENT`. |
 | `items`, `allergyCoverage`, `unfedGuests`, `price` | Same shapes as the option |
 | `payment` | See below |
 | `fulfillment` | `{ restaurantOrderIds, providerPayment: { amount, payTo, txHash, verifiedOnChain, network }, confirmedAt }` |
-| `refund` | `{ status: "SUCCEEDED"\|"PENDING", method, amount, note? }` |
+| `refund` | The latest refund: `{ status: "SUCCEEDED"\|"PENDING", method, amount, note? }` |
+| `refunds` | Every refund: `[{ amount, method, status, reason, detail, at, restaurantOrderId? }]`. `reason` is `cancel`, `failed`, `cancelled` (by the restaurant), `late` or `not_delivered` |
 | `error` | `{ code, message }` |
 
 `payment` holds:
@@ -304,8 +305,22 @@ On success you also receive the `order.delivery_updated` webhook.
 | Order status | Result |
 | --- | --- |
 | `AWAITING_PAYMENT` | Cancels the payment links |
-| `CONFIRMED`, before the restaurant's deadline | Cancels at the restaurant and refunds |
+| `CONFIRMED`, before the restaurant's deadline | Cancels at the restaurant and refunds the restaurant's part (see Refunds) |
 | Otherwise | `409 cancel_refused` or `409 invalid_state` |
+
+### Refunds
+
+| What happened | Refund | Webhook |
+| --- | --- | --- |
+| The host cancels before the restaurant's deadline (`POST /orders/:id/cancel`) | The restaurant's part of the order. Dunback's commission and service fee are kept. A card payment's processing fee is not refunded (Stripe keeps it). | `order.cancelled` |
+| The restaurant couldn't take the order after payment | Everything the host paid | `order.failed` |
+| A delivery was late, failed, or was cancelled by the restaurant | Everything the host paid for that delivery, card processing fee included | `order.refunded` |
+
+Card payments are always refunded to the card; USDC refunds are sent to the
+paying address after review. `refunds` lists every refund of the order;
+`refund` is the latest one. When every delivery of an order failed, the order
+becomes `REFUNDED` (or `REFUND_PENDING` while a refund is still due); when only
+some did, it stays `CONFIRMED` and `order.refunded` tells you about each refund.
 
 ### `POST /orders/:id/pay/x402?t=<token>` (x402 resource; no API key, the URL is `payment.usdc.x402Url`)
 
@@ -336,7 +351,7 @@ The `Dunback-Signature: t=<unix>,v1=<hex>` header is
 | Event | `data` |
 | --- | --- |
 | `catering.options_ready`, `catering.no_options`, `catering.failed` | CateringRequest |
-| `order.created`, `order.confirmed`, `order.payment_failed`, `order.expired`, `order.failed`, `order.needs_attention`, `order.cancelled`, `order.delivery_updated` | Order |
+| `order.created`, `order.confirmed`, `order.payment_failed`, `order.expired`, `order.failed`, `order.needs_attention`, `order.cancelled`, `order.refunded`, `order.delivery_updated` | Order |
 | `ping` | `{ object: "ping", appId, message }`, plus top-level `livemode`. Sent by **Send test event** in the Developer Dashboard. |
 
 The webhook URL, its signing secret (reveal or roll) and the allowed return

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0
+
+- Refunds: orders gain `refunds`, a list of every refund with its amount,
+  method (`stripe` or `usdc`), status, `reason` and date. `refund` still holds
+  the latest one. New webhook event `order.refunded`.
+- When the host isn't at fault (the restaurant cancelled a delivery, it was
+  delivered late or not delivered), that delivery is refunded in full,
+  including the card processing fee. When the host cancels before the deadline,
+  the restaurant's part is refunded. Card payments are refunded to the card
+  automatically.
+
 ## 0.6.0
 
 - **Breaking:** prices no longer include `restaurantAmount`,

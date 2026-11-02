@@ -358,7 +358,18 @@ export interface Order {
     providerPayment: { amount: number; payTo: string; txHash: string | null; verifiedOnChain: boolean; network: "polygon" };
     confirmedAt: string;
   } | null;
+  /** The latest refund. */
   refund: { status: "SUCCEEDED" | "PENDING"; method: "stripe" | "usdc"; amount: number; note?: string } | null;
+  /**
+   * Every refund of the order. `reason`: "cancel" (the host cancelled: the
+   * restaurant's part), "failed" (the restaurant couldn't take it), or, for one
+   * delivery the host isn't at fault for (refunded in full), "cancelled" (by the
+   * restaurant), "late" or "not_delivered".
+   */
+  refunds?: Array<{
+    amount: number; method: "stripe" | "usdc"; status: "SUCCEEDED" | "PENDING";
+    reason: string; detail: string | null; at: string; restaurantOrderId?: string;
+  }>;
   error: { code: string; message: string } | null;
   createdAt: string;
   updatedAt: string;
@@ -367,7 +378,7 @@ export interface Order {
 export type WebhookEventType =
   | "catering.options_ready" | "catering.no_options" | "catering.failed"
   | "order.created" | "order.confirmed" | "order.payment_failed" | "order.expired"
-  | "order.failed" | "order.needs_attention" | "order.cancelled"
+  | "order.failed" | "order.needs_attention" | "order.cancelled" | "order.refunded"
   | "order.delivery_updated"
   | "ping";
 
