@@ -2,7 +2,8 @@
  * Helpers for the Luma integration:
  *
  *   1. Event creation: the host turns on "Food & drinks by Dunback Meadow" and
- *      picks a cuisine  -> store a DunbackEventSettings with the event.
+ *      names a preferred restaurant OR picks a cuisine -> store a
+ *      DunbackEventSettings with the event.
  *   2. Registration: add DUNBACK_REGISTRATION_QUESTION to the event's form, so
  *      guests can note allergies.
  *   3. After the guest list is final: "Order Food via Dunback Meadow" ->
@@ -18,7 +19,13 @@ import type { Address, Attendee, CateringRequestInput, CateringServiceStyle, Cui
 /** Stored with a Luma event when the host enables Dunback catering. */
 export interface DunbackEventSettings {
   enabled: boolean;
-  cuisine: CuisineId;
+  /**
+   * A restaurant the host prefers (listRestaurants()). When set, don't offer
+   * a cuisine picker: the restaurant settles it, and all options come from it.
+   */
+  restaurantName?: string;
+  /** Required when no restaurantName is set. */
+  cuisine?: CuisineId;
   /**
    * Buffet (trays to share) or individual meal boxes. Pass it to
    * listCuisines(venue, { serviceStyle }) too: fewer restaurants offer buffets.
@@ -205,6 +212,7 @@ export interface BuildCateringRequestArgs {
 export function buildCateringRequest(args: BuildCateringRequestArgs): CateringRequestInput {
   const { event, guests, settings, host } = args;
   if (!settings?.enabled) throw new Error("Dunback catering is not enabled for this event.");
+  if (!settings.restaurantName && !settings.cuisine) throw new Error("Choose a restaurant or a cuisine for the catering.");
   const onsite = args.onsiteContact || settings.onsiteContact || (host.phone ? { name: host.name, phone: host.phone, email: host.email } : null);
   if (!onsite) throw new Error("An on-site contact with a phone number is required for delivery.");
   const attendees = [...toDunbackAttendees(guests), ...(args.extraAttendees || [])];
@@ -214,7 +222,7 @@ export function buildCateringRequest(args: BuildCateringRequestArgs): CateringRe
     partnerReference: `luma:${event.api_id || event.id}`,
     event: { name: event.name, startsAt: event.start_at, timeZone: event.timezone, ...(event.url ? { url: event.url } : {}) },
     ...(settings.deliveryDeadlineLocal ? { deliveryDeadlineLocal: settings.deliveryDeadlineLocal } : {}),
-    cuisine: settings.cuisine,
+    ...(settings.restaurantName ? { restaurantName: settings.restaurantName } : { cuisine: settings.cuisine }),
     serviceStyle: settings.serviceStyle ?? "meal_boxes",
     includeDrinks: settings.includeDrinks ?? true,
     ...(settings.budgetPerGuest ? { budgetPerGuest: settings.budgetPerGuest } : {}),

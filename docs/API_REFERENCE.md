@@ -45,6 +45,14 @@ The app and environment the key belongs to.
 
 ## Catalog
 
+### `GET /catalog/restaurants?city=&state=&zip=&q=`
+
+Restaurants a host can name (`restaurantName` on a catering request) instead of
+choosing a cuisine. With the venue, only restaurants in its metro area; `q`
+filters by name. Returns `{ data: [{ name, cuisine, secondaryCuisine }], scope, metro }`.
+When the host names a restaurant, don't offer a cuisine picker: every option
+comes from that restaurant.
+
 ### `GET /catalog/cuisines?city=&state=&zip=&guests=&serviceStyle=`
 
 Pass the event venue (`zip`, or `city` + `state`) to count only restaurants in
@@ -98,7 +106,8 @@ serves them. Hosts can pick them like any other: send the `id` as `cuisine`.
 | `event.timeZone` | IANA, required | Venue time zone |
 | `event.url` | URL | |
 | `deliveryDeadlineLocal` | `YYYY-MM-DDTHH:mm` | Default: `startsAt` minus 30 min, venue-local |
-| `cuisine` | cuisine id, required | A standard id or a `custom:…` id from `/catalog/cuisines` |
+| `restaurantName` | string | A restaurant the host prefers (`/catalog/restaurants`): all options come from it. Send it or `cuisine`, not both. If it can't cater, `restaurant.available` is false and `restaurant.reason` says why; the options are from other restaurants |
+| `cuisine` | cuisine id, required without `restaurantName` | A standard id or a `custom:…` id from `/catalog/cuisines` |
 | `serviceStyle` | `buffet` or `meal_boxes` | How food is served. `buffet`: trays and platters to share, from restaurants with catering dishes. `meal_boxes`: one packed meal per guest from restaurants' regular dishes (more dishes, usually more restaurants). Default `meal_boxes`. |
 | `includeDrinks` | bool | Default true. Non-alcoholic only. |
 | `budgetPerGuest` | number | Flags options above it |
@@ -210,7 +219,7 @@ The card total is the USDC total grossed up for card processing.
 | `optionId` | required |
 | `payer` | `{ name?, email? }` (pre-fills Stripe) |
 | `paymentMethods` | `["stripe","usdc"]` (default both) |
-| `successUrl`, `cancelUrl` | Stripe return URLs: https, on your registered hosts |
+| `successUrl`, `cancelUrl` | Stripe return URLs: https, on your registered hosts. The hosted payment page links back to them ("Back to the event": `cancelUrl` before payment, `successUrl` after) |
 
 Errors:
 
@@ -238,6 +247,8 @@ Errors:
 | `fulfillment` | `{ restaurantOrderIds, providerPayment: { amount, payTo, txHash, verifiedOnChain, network }, confirmedAt }` |
 | `refund` | The latest refund: `{ status: "SUCCEEDED"\|"PENDING", method, amount, note? }` |
 | `refunds` | Every refund: `[{ amount, method, status, reason, detail, at, restaurantOrderId? }]`. `reason` is `cancel`, `failed`, `cancelled` (by the restaurant), `late` or `not_delivered` |
+| `cancellation` | The cancellation and refund policy as it applies now; see Cancellation and refund policy |
+| `lateRefund` | `{ afterMinutes, requestableFrom }`: a delivery `afterMinutes` or more late can get a refund request; offer it only from `requestableFrom` |
 | `error` | `{ code, message }` |
 
 `payment` holds:
@@ -300,21 +311,68 @@ The price stays as quoted, so the correction is checked:
 
 On success you also receive the `order.delivery_updated` webhook.
 
-### `POST /orders/:id/cancel` `{ reason? }` → Order
+### `POST /orders/:id/cancel` `{ reason?, acceptPostCommitment? }` → Order
 
 | Order status | Result |
 | --- | --- |
 | `AWAITING_PAYMENT` | Cancels the payment links |
-| `CONFIRMED`, before the restaurant's deadline | Cancels at the restaurant and refunds the restaurant's part (see Refunds) |
+| `CONFIRMED`, before the commitment deadline | Cancels at the restaurant and refunds the restaurant's full amount (card automatically, USDC after review) |
+| `CONFIRMED`, after the commitment deadline, before delivery | Requires `"acceptPostCommitment": true` (else `409 post_commitment_confirmation_required`, with `details.cancellation`). Cancels at the restaurant; Dunback decides the refund (`order.refund_decided`) |
 | Otherwise | `409 cancel_refused` or `409 invalid_state` |
+
+### Cancellation and refund policy
+
+Dunback applies one cancellation and refund policy to every catering order,
+whatever the restaurant's own policy elsewhere:
+
+- **Before the commitment deadline:** the host may cancel and is refunded the
+  restaurant's full amount (food, delivery, restaurant fees and taxes).
+  Dunback's service fee and commission are kept.
+- **After the commitment deadline, until delivery:** the host may still cancel
+  (for example, the event is called off). The restaurant may already have
+  bought or prepared food, so Dunback decides the refund with the restaurant,
+  from nothing up to that full amount, and sends it. You get
+  `order.refund_decided` with the decision and Dunback's explanation (and
+  `order.refunded` when money moves); the host is emailed too.
+
+Every order carries `cancellation`:
+
+| Field | Meaning |
+| --- | --- |
+| `policy` | The policy in one paragraph. **Show it with the order.** Options carry the same text as `cancellationPolicy`. |
+| `phase` | `unpaid`, `before_commitment`, `after_commitment` or `closed` |
+| `notice` | What cancelling now means. **Show it again, and get the host's confirmation, before you call cancel.** |
+| `commitmentDeadlineUtc`, `deliveryDeadlineUtc` | ISO instants |
+| `refundIfCancelledNow` | `{ kind: "restaurant_full_refund", amount }`, `{ kind: "decided_by_dunback", maximum }` or null |
+| `requiresAcceptPostCommitment` | true after the commitment deadline |
+
+
+### `POST /orders/:id/refund-requests` `{ restaurantOrderId?, reason, impact }` → 202
+
+For a catering delivery made at or after Dunback's catering late-delivery
+threshold (60 minutes by default; Dunback may change it). You receive
+`order.delivered_late` (the order, plus `lateDeliveries` and
+`lateRefundPolicy`) when that happens; show the policy and let the host ask.
+
+- `reason` (required): why the host is asking for a refund.
+- `impact` (required): how the late delivery affected the event.
+- Late deliveries are not refunded automatically. Dunback reviews the request
+  and decides the refund at its discretion, from nothing up to the
+  restaurant's part of that delivery; Dunback's service fee and commission are
+  not refunded. You get `order.refund_decided` with the decision (and
+  `order.refunded` if anything is refunded); the host is emailed.
+- Errors: `409 not_late`, `409 already_requested`, `409 request_window_closed`
+  (30 days after delivery), `400 invalid_request`.
 
 ### Refunds
 
 | What happened | Refund | Webhook |
 | --- | --- | --- |
-| The host cancels before the restaurant's deadline (`POST /orders/:id/cancel`) | The restaurant's part of the order. Dunback's commission and service fee are kept. A card payment's processing fee is not refunded (Stripe keeps it). | `order.cancelled` |
+| The host cancels before the commitment deadline (`POST /orders/:id/cancel`) | The restaurant's part of the order. Dunback's commission and service fee are kept. A card payment's processing fee is not refunded (Stripe keeps it). | `order.cancelled` |
+| The host cancels after the commitment deadline, before delivery (`acceptPostCommitment: true`) | What Dunback decides with the restaurant: 0% to 100% of the restaurant's part | `order.cancelled`, then `order.refund_decided` (and `order.refunded` if anything is refunded) |
 | The restaurant couldn't take the order after payment | Everything the host paid | `order.failed` |
-| A delivery was late, failed, or was cancelled by the restaurant | Everything the host paid for that delivery, card processing fee included | `order.refunded` |
+| A delivery failed, or was cancelled by the restaurant | Everything the host paid for that delivery, card processing fee included | `order.refunded` |
+| A delivery was at or after the catering late-delivery threshold, and the host requested a refund | What Dunback decides: 0% to 100% of the restaurant's part of that delivery | `order.refund_decided` (and `order.refunded`) |
 
 Card payments are always refunded to the card; USDC refunds are sent to the
 paying address after review. `refunds` lists every refund of the order;
@@ -352,6 +410,8 @@ The `Dunback-Signature: t=<unix>,v1=<hex>` header is
 | --- | --- |
 | `catering.options_ready`, `catering.no_options`, `catering.failed` | CateringRequest |
 | `order.created`, `order.confirmed`, `order.payment_failed`, `order.expired`, `order.failed`, `order.needs_attention`, `order.cancelled`, `order.refunded`, `order.delivery_updated` | Order |
+| `order.refund_decided` | Order plus `refundDecision: { restaurantOrderId, basis, percentage, amount, explanation, refund }` |
+| `order.delivered_late` | Order plus `lateDeliveries: [{ restaurantOrderId, lateMinutes }]` and `lateRefundPolicy` |
 | `ping` | `{ object: "ping", appId, message }`, plus top-level `livemode`. Sent by **Send test event** in the Developer Dashboard. |
 
 The webhook URL, its signing secret (reveal or roll) and the allowed return

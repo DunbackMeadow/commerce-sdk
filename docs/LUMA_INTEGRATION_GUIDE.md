@@ -224,6 +224,10 @@ Show the host two buttons:
 
 Or build your own USDC screen from `order.payment.usdc`.
 
+Always pass `successUrl` and `cancelUrl`. Stripe sends the host back to
+them, and Dunback's payment page (`hostedPaymentUrl`) shows a **Back to the
+event** button linking to `cancelUrl` before payment and `successUrl` after it.
+
 After the Stripe redirect back to `successUrl`, call `dunback.orders.get(order.id)`.
 It re-checks Stripe, so it doesn't depend on webhook timing. Then show
 `<DunbackOrderStatus>` until the status is `CONFIRMED`.
@@ -232,6 +236,34 @@ The payment window is `order.payment.expiresAt`: 60 minutes by default, and
 always before the restaurant's order deadline. When it expires, Luma receives
 `order.expired`, the catering request goes back to `OPTIONS_READY`, and the
 host can choose again.
+
+### Mobile apps
+
+In the Luma app, open the payment links in an **in-app browser**, not in the
+app's own web view:
+
+- **iOS:** `SFSafariViewController` (or `ASWebAuthenticationSession`).
+- **Android:** Chrome Custom Tabs.
+- **React Native / Expo:** `WebBrowser.openAuthSessionAsync(url, successUrl)`.
+
+The in-app browser slides over the app with its own **Done** / close button,
+so the host can always get back, and the app keeps its place. Stripe Checkout
+also expects to run in a real browser, not in an embedded web view.
+
+To come straight back after paying, make `successUrl` and `cancelUrl` links
+that open the app: register them as iOS universal links and Android app links
+(for example `https://lu.ma/event/manage/<id>?dunback=paid`). When the
+in-app browser reaches one, close it and call `dunback.orders.get(order.id)`.
+
+If you show `<DunbackOrderStatus>` in a web view, pass `onOpenPayment` so its
+links open in the in-app browser instead of replacing your page:
+
+```tsx
+<DunbackOrderStatus
+  order={order}
+  onOpenPayment={(url) => openInAppBrowser(url)} // your native bridge
+/>
+```
 
 ## 7. Webhooks
 
@@ -259,7 +291,7 @@ app.post("/webhooks/dunback", express.raw({ type: "application/json" }), (req, r
 
 ## 8. Cancellation
 
-`dunback.orders.cancel(orderId, reason)` works in two cases:
+`dunback.orders.cancel(orderId, reason)` works in three cases:
 
 - **Before payment:** the payment links are cancelled.
 - **After confirmation, before the restaurant's order deadline:** the order is
@@ -267,11 +299,22 @@ app.post("/webhooks/dunback", express.raw({ type: "application/json" }), (req, r
   of the order. Dunback's commission and service fee are kept, and so is the
   card processing fee (Stripe keeps it). Card refunds are automatic; USDC
   refunds are sent after review.
+- **After the restaurant's order deadline, until delivery:** the host can
+  still cancel (for example, the event is called off). Pass
+  `{ acceptPostCommitment: true }`. Dunback decides the refund with the
+  restaurant, from nothing up to the restaurant's part, and sends
+  `order.refund_decided`. Without it, the call fails with
+  `post_commitment_confirmation_required`.
 
 If the host isn't at fault (a late or failed delivery, or the restaurant
 cancelled), everything they paid is refunded, card processing fee included.
 
-After the deadline, the call fails with `cancel_refused`.
+**Before you call `orders.cancel()`,** show Dunback's cancellation notice and
+policy in your page: `order.cancellation.notice` (what cancelling now means)
+and `order.cancellation.policy`. Then ask the host to confirm there, with a
+confirm button and a button to keep the order. Use an in-page confirmation
+rather than a browser pop-up (`window.confirm`): pop-ups can't show the policy
+clearly and are often blocked or hidden in mobile apps.
 
 ## 9. Testing checklist (sandbox)
 

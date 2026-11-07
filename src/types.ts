@@ -67,6 +67,13 @@ export interface CuisineCatalog {
   serviceStyle: CateringServiceStyle | null;
 }
 
+/** GET /catalog/restaurants: restaurants a host can name instead of choosing a cuisine. */
+export interface RestaurantSummary {
+  name: string;
+  cuisine: { id: CuisineId; label: string } | null;
+  secondaryCuisine: { id: CuisineId; label: string } | null;
+}
+
 /** Options for listCuisines() / cuisineCatalog(). */
 export interface CuisineQuery {
   /** Count only restaurants that serve catering this way. */
@@ -138,7 +145,25 @@ export interface CateringRequestInput {
   };
   /** Venue-local "YYYY-MM-DDTHH:mm". Default: 30 minutes before the event starts. */
   deliveryDeadlineLocal?: string;
-  cuisine: CuisineId;
+  /**
+   * A restaurant the host prefers (see listRestaurants()). All options then
+   * come from it, and no cuisine is chosen: send restaurantName OR cuisine,
+   * never both. If it can't cater the event, the request says why
+   * (`restaurant.available: false`, `restaurant.reason`) and the options are
+   * from other restaurants.
+   */
+  restaurantName?: string;
+  /**
+   * Required when no restaurantName is given. Restaurants whose primary
+   * cuisine this is are matched first; restaurants listing it as their
+   * secondary cuisine only when none of those can cater.
+   */
+  cuisine?: CuisineId;
+  /**
+   * A combination style: cuisine "chinese" + secondaryCuisine "american" asks
+   * for Chinese-American, matched only by restaurants that declared both, in that order.
+   */
+  secondaryCuisine?: CuisineId;
   /** Buffet (trays to share) or individual meal boxes. Default "meal_boxes". */
   serviceStyle?: CateringServiceStyle;
   /** Non-alcoholic drinks, one per guest. Default true. */
@@ -233,6 +258,8 @@ export interface CateringOption {
   withinBudget?: boolean;
   /** Pay before this instant (ISO), or the restaurant can't make the event time. */
   orderBy: string | null;
+  /** Dunback's catering cancellation and refund policy, in one paragraph. Show it with the option. */
+  cancellationPolicy: string;
 }
 
 export type CateringRequestStatus = "COMPOSING" | "OPTIONS_READY" | "NO_OPTIONS" | "SELECTED" | "FAILED";
@@ -243,7 +270,15 @@ export interface CateringRequest {
   status: CateringRequestStatus;
   partnerReference: string;
   event: CateringRequestInput["event"] & { startsAtLocal: string };
-  cuisine: { id: CuisineId; label: string };
+  /** null when the host named a restaurant instead. */
+  cuisine: { id: CuisineId; label: string } | null;
+  secondaryCuisine?: { id: CuisineId; label: string } | null;
+  /**
+   * The restaurant the host named, or null. `available` false: it can't
+   * cater this event (`reason`), and the options are from other restaurants.
+   * `found` false: no restaurant by that name. null fields: still composing.
+   */
+  restaurant: { requested: string; found: boolean | null; name: string | null; available: boolean | null; reason: string | null } | null;
   serviceStyle: CateringServiceStyle;
   guestCount: number;
   deliveryDeadlineLocal: string;
@@ -370,16 +405,108 @@ export interface Order {
     amount: number; method: "stripe" | "usdc"; status: "SUCCEEDED" | "PENDING";
     reason: string; detail: string | null; at: string; restaurantOrderId?: string;
   }>;
+  /** Where the order stands for cancelling. Show `policy` with the order. */
+  cancellation: OrderCancellation;
+  /**
+   * Late-delivery refunds: a delivery `afterMinutes` or more past the delivery
+   * deadline counts as late. `requestableFrom` is the earliest moment that can
+   * be true: offer "request a refund" (`orders.requestRefund`) only from then.
+   */
+  lateRefund?: { afterMinutes: number; requestableFrom: string | null };
   error: { code: string; message: string } | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Dunback's uniform catering cancellation and refund policy, as it applies to
+ * an order now:
+ *   "unpaid"            nothing charged; cancelling closes the payment links
+ *   "before_commitment" cancel for the restaurant's full refund (Dunback's fees kept)
+ *   "after_commitment"  may still cancel until delivery; Dunback decides the
+ *                       refund with the restaurant, 0 up to `refundIfCancelledNow.maximum`
+ *   "closed"            can't be cancelled
+ * Before cancelling, show `notice` to the host and get their confirmation.
+ * After the commitment deadline, pass `acceptPostCommitment: true` to
+ * orders.cancel(); without it the call fails with 409
+ * `post_commitment_confirmation_required` (details.cancellation has this object).
+ */
+export interface OrderCancellation {
+  policy: string;
+  phase: "unpaid" | "before_commitment" | "after_commitment" | "closed";
+  cancellable: boolean;
+  commitmentDeadlineUtc: string | null;
+  deliveryDeadlineUtc: string | null;
+  notice: string | null;
+  refundIfCancelledNow:
+    | { kind: "restaurant_full_refund"; amount: number | null }
+    | { kind: "decided_by_dunback"; maximum: number | null }
+    | null;
+  requiresAcceptPostCommitment: boolean;
+}
+
+/**
+ * orders.requestRefund(): a catering delivery made at or after Dunback's
+ * catering late-delivery threshold (60 minutes by default). Both texts are
+ * required and go to Dunback's reviewer.
+ */
+export interface LateRefundRequestInput {
+  /** Which restaurant order (order.fulfillment.restaurantOrderIds); default: the late one. */
+  restaurantOrderId?: string;
+  /** Why the host is asking for a refund. */
+  reason: string;
+  /** How the late delivery affected the event. */
+  impact: string;
+}
+
+/** 202 from orders.requestRefund(). Dunback's decision follows as `order.refund_decided`. */
+export interface LateRefundRequest {
+  object: "refund_request";
+  status: "REQUESTED";
+  orderId: string;
+  restaurantOrderId: string;
+  lateMinutes: number;
+  /** The most the refund can be: the restaurant's part of that delivery. */
+  maximum: number;
+  policy: string;
+  requestedAt: string;
+}
+
+/** `data` of `order.delivered_late`: the order, and which deliveries were late. */
+export interface DeliveredLateData extends Order {
+  lateDeliveries: Array<{ restaurantOrderId: string; lateMinutes: number }>;
+  /** Dunback's policy for late catering refunds. Show it with a "Request a refund" action. */
+  lateRefundPolicy: string;
+}
+
+/** Options for orders.cancel(). */
+export interface CancelOrderOptions {
+  /** The host confirmed cancelling after the commitment deadline (the refund is then decided by Dunback). */
+  acceptPostCommitment?: boolean;
+}
+
+/**
+ * `data` of `order.refund_decided`: the order, plus Dunback's decision on a
+ * restaurant order the host cancelled after its commitment deadline.
+ * `refund` is null when nothing is refunded (amount 0).
+ */
+export interface RefundDecidedData extends Order {
+  refundDecision: {
+    restaurantOrderId: string;
+    /** Why the refund was decided: a cancellation after the commitment deadline, or a late delivery. */
+    basis: "cancelled_after_commitment" | "late_delivery";
+    percentage: number;
+    amount: number;
+    explanation: string;
+    refund: { status: "SUCCEEDED" | "PENDING"; method: "stripe" | "usdc"; amount: number; note?: string } | null;
+  };
 }
 
 export type WebhookEventType =
   | "catering.options_ready" | "catering.no_options" | "catering.failed"
   | "order.created" | "order.confirmed" | "order.payment_failed" | "order.expired"
   | "order.failed" | "order.needs_attention" | "order.cancelled" | "order.refunded"
-  | "order.delivery_updated"
+  | "order.refund_decided" | "order.delivered_late" | "order.delivery_updated"
   | "ping";
 
 /** `data` of a `ping` event, sent by "Send test event" in the Developer Dashboard. */

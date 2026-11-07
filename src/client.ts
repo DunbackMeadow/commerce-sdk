@@ -1,6 +1,6 @@
 import { DunbackApiError } from "./errors.js";
 import type {
-  AppInfo, CateringRequest, CateringRequestInput, Cuisine, CuisineCatalog, CuisineQuery, Order, SelectOptionInput, UpdateDeliveryInput,
+  AppInfo, CancelOrderOptions, CateringRequest, RestaurantSummary, LateRefundRequest, LateRefundRequestInput, CateringRequestInput, Cuisine, CuisineCatalog, CuisineQuery, Order, SelectOptionInput, UpdateDeliveryInput,
   VenueLocation,
 } from "./types.js";
 
@@ -109,6 +109,22 @@ export class DunbackClient {
     return (await this.cuisineCatalog(venue, query)).data;
   }
 
+  /**
+   * Restaurants a host can name (`restaurantName` on a catering request)
+   * instead of choosing a cuisine. With a venue, only restaurants in its metro
+   * area; `q` filters by name (for a search box).
+   */
+  async listRestaurants(venue?: VenueLocation | null, q = ""): Promise<RestaurantSummary[]> {
+    const p = new URLSearchParams();
+    for (const k of ["city", "state", "zip"] as const) {
+      const v = String(venue?.[k] ?? "").trim();
+      if (v) p.set(k, v);
+    }
+    if (q.trim()) p.set("q", q.trim());
+    const qs = p.toString();
+    return (await this.request<{ data: RestaurantSummary[] }>("GET", `/catalog/restaurants${qs ? `?${qs}` : ""}`)).data;
+  }
+
   /** listCuisines() plus which metro area the counts are for (`metro` is null when Dunback doesn't serve the venue's area). */
   async cuisineCatalog(venue?: VenueLocation | null, query: CuisineQuery = {}): Promise<CuisineCatalog> {
     const q = new URLSearchParams();
@@ -180,9 +196,31 @@ export class DunbackClient {
     updateDelivery: (orderId: string, input: UpdateDeliveryInput) =>
       this.request<Order>("POST", `/orders/${encodeURIComponent(orderId)}/delivery`, input),
 
-    /** Unpaid orders: cancels the payment links. Confirmed orders: cancels at the restaurant (before its order deadline) and refunds. */
-    cancel: (orderId: string, reason?: string) =>
-      this.request<Order>("POST", `/orders/${encodeURIComponent(orderId)}/cancel`, { reason }),
+    /**
+     * Unpaid orders: cancels the payment links. Confirmed orders: cancels at
+     * the restaurant. Before the commitment deadline the restaurant's full
+     * refund is sent; after it (until delivery) pass
+     * `{ acceptPostCommitment: true }` once the host has seen
+     * `order.cancellation.notice`, and Dunback decides the refund with the
+     * restaurant (webhook `order.refund_decided`). Without it, that call fails
+     * with 409 `post_commitment_confirmation_required`.
+     */
+    cancel: (orderId: string, reason?: string, options: CancelOrderOptions = {}) =>
+      this.request<Order>("POST", `/orders/${encodeURIComponent(orderId)}/cancel`, {
+        reason,
+        ...(options.acceptPostCommitment ? { acceptPostCommitment: true } : {}),
+      }),
+
+    /**
+     * Asks for a refund of a catering delivery made at or after the catering
+     * late-delivery threshold (webhook `order.delivered_late`). The host
+     * gives the reason and how the delay affected the event; Dunback decides
+     * the refund (0 up to the restaurant's part; Dunback's fees aren't
+     * refunded) and sends `order.refund_decided`. Errors: 409 `not_late`,
+     * `already_requested`, `request_window_closed`.
+     */
+    requestRefund: (orderId: string, input: LateRefundRequestInput) =>
+      this.request<LateRefundRequest>("POST", `/orders/${encodeURIComponent(orderId)}/refund-requests`, input),
 
     /** Polls until the order leaves AWAITING_PAYMENT/PAID/FULFILLING. */
     waitForSettlement: async (orderId: string, { timeoutMs = 15 * 60_000, intervalMs = 5_000 } = {}) => {

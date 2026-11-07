@@ -11,7 +11,7 @@
  */
 
 import React, { useState } from "react";
-import type { CateringOption, CateringServiceStyle, Cuisine, CuisineId, Order, Price } from "../types.js";
+import type { CateringOption, CateringServiceStyle, Cuisine, CuisineId, Order, Price, RestaurantSummary } from "../types.js";
 import type { DunbackEventSettings } from "../luma.js";
 
 const money = (n: number) => `$${Number(n || 0).toFixed(2)}`;
@@ -60,10 +60,16 @@ export interface DunbackCateringSettingsProps {
    * that many, in that style. Default true.
    */
   askExpectedGuests?: boolean;
+  /**
+   * From your backend: dunback.listRestaurants(venue). Offered as suggestions
+   * in the optional "Preferred restaurant" field. When the host names a
+   * restaurant, the cuisine picker is hidden: the restaurant settles it.
+   */
+  restaurants?: RestaurantSummary[];
   className?: string;
 }
 
-export function DunbackCateringSettings({ cuisines, value, onChange, venueReady, metroName, askExpectedGuests = true, className }: DunbackCateringSettingsProps) {
+export function DunbackCateringSettings({ cuisines, value, onChange, venueReady, metroName, askExpectedGuests = true, restaurants = [], className }: DunbackCateringSettingsProps) {
   const enabled = !!value?.enabled;
   const showAvailability = venueReady !== false;
   const firstAvailable = (showAvailability ? cuisines.find((c) => c.restaurants > 0)?.id : null) || cuisines[0]?.id || "american";
@@ -129,8 +135,37 @@ export function DunbackCateringSettings({ cuisines, value, onChange, venueReady,
             ))}
           </fieldset>
           <label style={field}>
+            <span>Preferred restaurant <span style={hint}>(optional)</span></span>
+            <input
+              style={control}
+              list="dunback-restaurants"
+              placeholder="Any restaurant"
+              value={value.restaurantName ?? ""}
+              onChange={(e) => {
+                const name = e.target.value;
+                // A named restaurant replaces the cuisine; clearing it brings the cuisine back.
+                onChange(name.trim()
+                  ? { ...value, restaurantName: name, cuisine: undefined }
+                  : { ...value, restaurantName: undefined, cuisine: value.cuisine || firstAvailable });
+              }}
+            />
+            {restaurants.length > 0 && (
+              <datalist id="dunback-restaurants">
+                {restaurants.map((r) => (
+                  <option key={r.name} value={r.name}>{r.cuisine ? `${r.cuisine.label}${r.secondaryCuisine ? `-${r.secondaryCuisine.label}` : ""}` : ""}</option>
+                ))}
+              </datalist>
+            )}
+            <span style={hint}>
+              {value.restaurantName?.trim()
+                ? "All catering options will come from this restaurant. If it can't cater your event, you'll see why, with options from other restaurants."
+                : "Leave empty to choose a cuisine instead."}
+            </span>
+          </label>
+          {!value.restaurantName?.trim() && (
+          <label style={field}>
             Cuisine
-            <select style={control} value={value.cuisine} onChange={(e) => onChange({ ...value, cuisine: e.target.value as CuisineId })}>
+            <select style={control} value={value.cuisine || ""} onChange={(e) => onChange({ ...value, cuisine: e.target.value as CuisineId })}>
               {cuisines.filter((c) => !c.custom).map(option)}
               {custom.length > 0 && (
                 <optgroup label={venueReady === true ? "More cuisines near this venue" : "More cuisines"}>
@@ -138,7 +173,7 @@ export function DunbackCateringSettings({ cuisines, value, onChange, venueReady,
                 </optgroup>
               )}
               {/* A saved choice no longer offered here (e.g. a custom cuisine after the venue changed). */}
-              {!cuisines.some((c) => c.id === value.cuisine) && (
+              {!!value.cuisine && !cuisines.some((c) => c.id === value.cuisine) && (
                 <option value={value.cuisine} disabled>{labelOf(value.cuisine)}{none}</option>
               )}
             </select>
@@ -153,6 +188,7 @@ export function DunbackCateringSettings({ cuisines, value, onChange, venueReady,
               </span>
             )}
           </label>
+          )}
           {askExpectedGuests && (
             <label style={field}>
               <span>Expected guests <span style={hint}>(optional)</span></span>
@@ -310,8 +346,28 @@ const STATUS: Record<string, string> = {
   NEEDS_ATTENTION: "Payment received; Dunback support is finishing the order",
 };
 
-export function DunbackOrderStatus({ order, className }: { order: Order; className?: string }) {
+/** Which payment link the host chose: Stripe Checkout, or Dunback's page with the other options. */
+export type PaymentLinkKind = "card" | "other";
+
+/**
+ * The order's status and, while it awaits payment, its payment links.
+ *
+ * `onOpenPayment`: open the payment page yourself instead of following the
+ * link in the current page. In a mobile app, open it in an in-app browser
+ * (SFSafariViewController / Chrome Custom Tabs) so the host can always get back
+ * to your app. Without it, the links are plain links.
+ */
+export function DunbackOrderStatus({ order, className, onOpenPayment }: {
+  order: Order;
+  className?: string;
+  onOpenPayment?: (url: string, kind: PaymentLinkKind) => void;
+}) {
   const p = order.payment;
+  const open = (kind: PaymentLinkKind) => (e: { preventDefault: () => void; currentTarget: { href: string } }) => {
+    if (!onOpenPayment) return;
+    e.preventDefault();
+    onOpenPayment(e.currentTarget.href, kind);
+  };
   return (
     <div className={className} style={className ? undefined : box}>
       <strong>{order.title}</strong>
@@ -320,12 +376,19 @@ export function DunbackOrderStatus({ order, className }: { order: Order; classNa
       {order.error && order.status !== "CONFIRMED" && <p style={{ color: "#b91c1c", fontSize: 13 }}>{order.error.message}</p>}
       {order.status === "AWAITING_PAYMENT" && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-          {p.stripe && <a href={p.stripe.checkoutUrl}>Pay {money(p.stripe.amount)} by card</a>}
-          {p.hostedPaymentUrl && <a href={p.hostedPaymentUrl}>Other payment options</a>}
+          {p.stripe && <a href={p.stripe.checkoutUrl} onClick={open("card")}>Pay {money(p.stripe.amount)} by card</a>}
+          {p.hostedPaymentUrl && <a href={p.hostedPaymentUrl} onClick={open("other")}>Other payment options</a>}
         </div>
       )}
       {order.status === "AWAITING_PAYMENT" && p.expiresAt && (
         <p style={{ fontSize: 12, opacity: 0.7 }}>Pay by {new Date(p.expiresAt).toLocaleString()} to keep this order.</p>
+      )}
+      {/* Dunback's catering cancellation and refund policy: shown with every order. */}
+      {order.cancellation?.policy && order.cancellation.phase !== "closed" && (
+        <p style={{ fontSize: 12, opacity: 0.75 }}>
+          <strong>Cancellation policy:</strong> {order.cancellation.policy}
+          {order.cancellation.commitmentDeadlineUtc ? ` Commitment deadline: ${new Date(order.cancellation.commitmentDeadlineUtc).toLocaleString()}.` : ""}
+        </p>
       )}
     </div>
   );

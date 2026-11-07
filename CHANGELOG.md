@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.8.0
+
+- `<DunbackOrderStatus onOpenPayment={(url, kind) => ...}>`: open the payment
+  page yourself (`kind` is `"card"` or `"other"`), e.g. in an in-app browser in
+  a mobile app. Without it, the links are plain links as before.
+- The hosted payment page (`hostedPaymentUrl`) shows **Back to the event**,
+  linking to your `cancelUrl` before payment and your `successUrl` after it.
+- Catering orders can be cancelled after their commitment deadline, until
+  delivery. Orders gain `cancellation`: Dunback's cancellation and refund
+  policy (`policy`), where the order stands (`phase`), the `notice` to show
+  the host before they confirm, and what cancelling now refunds. Catering
+  options gain `cancellationPolicy`. Show the policy with orders and options.
+- `orders.cancel(id, reason, { acceptPostCommitment: true })`: required after
+  the commitment deadline (otherwise 409
+  `post_commitment_confirmation_required`). Dunback then decides the refund
+  with the restaurant (0 to the restaurant's full refund) and sends it; new
+  webhook event `order.refund_decided`.
+- Catering requests accept `secondaryCuisine` for combination styles
+  (Chinese-American). A single cuisine matches restaurants with it as their
+  primary cuisine first, then as their secondary.
+- `<DunbackOrderStatus>` shows the cancellation policy.
+- Catering requests take `restaurantName` (a restaurant the host prefers)
+  instead of `cuisine`: send one or the other. All options then come from
+  that restaurant; if it can't cater, `request.restaurant` says why and the
+  options are from other restaurants. `cuisine` is now optional (required
+  without a restaurant name) and `request.cuisine` may be null. New
+  `listRestaurants(venue?, q?)` (GET /catalog/restaurants) for a host's
+  restaurant search; `DunbackEventSettings.restaurantName`.
+- Orders gain `lateRefund: { afterMinutes, requestableFrom }`: offer the
+  host "request a refund" for a late delivery only from `requestableFrom`
+  (the delivery deadline plus Dunback's late-delivery threshold).
+- Late catering deliveries are no longer refunded automatically. A delivery
+  at or after Dunback's catering late-delivery threshold (60 minutes by
+  default) sends `order.delivered_late`; the host can then ask for a refund
+  with `orders.requestRefund(id, { reason, impact })`. Dunback decides it
+  (0 up to the restaurant's part; Dunback's fees aren't refunded) and sends
+  `order.refund_decided` (`refundDecision.basis: "late_delivery"`).
+
 ## 0.7.0
 
 - Refunds: orders gain `refunds`, a list of every refund with its amount,
