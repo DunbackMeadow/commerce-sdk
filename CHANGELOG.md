@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.9.0
+
+- Card payments through restaurants' own Stripe accounts (Stripe Connect):
+  options gain `acceptsCard` and `paymentMethods`. A restaurant that hasn't
+  set up card payments on Dunback can only be paid in USDC; selecting it with
+  `paymentMethods: ["stripe"]` fails with `card_payments_unavailable`.
+  `order.fulfillment.providerPayment` is `{ method: "stripe_connect", status }`
+  for card orders. Card checkout and refunds are otherwise unchanged.
+- Drinks-only catering: `drinksOnly: true` orders one drink per guest, no
+  food, from `restaurantName` (a cafe or boba shop) or any restaurant serving
+  the `drinkTypes`; no cuisine. `serviceStyle` "meal_boxes" means individual
+  cups, "buffet" shared containers (carafes, gallons).
+- `drinkTypes` ("coffee", "tea", "milk_tea", "boba"...; new
+  `listDrinkTypes()`, GET /catalog/drink-types) for drinks-only orders and for
+  the drinks with food. Catering requests echo `drinksOnly`, `includeDrinks`
+  and `drinkTypes`.
+- Drink items carry `modifiers` (the restaurant's own choices, e.g.
+  "Sweetness: 50%", "Toppings: Boba"), mixed differently by each option.
+- `DunbackEventSettings.drinksOnly` / `.drinkTypes`, and
+  `<DunbackCateringSettings>` offers "Food" or "Drinks only" and a "Which
+  drinks?" choice (new optional `drinkTypes` prop).
+- Orders gain `revision`: set when the restaurant changed the items after
+  calling the host and getting their agreement ("Revised by restaurant with
+  user agreement."); `revision.items` is what it will prepare. The price never
+  changes. New webhook event `order.revised`.
+- Dunback's catering service fee (`dunbackServiceFee`) is now `serviceFeeRate`
+  x (food and drinks + the restaurant's own service charge), not food and
+  drinks alone. Delivery and tax are still not included. Server-side change;
+  no code change needed.
+
 ## 0.8.0
 
 - `<DunbackOrderStatus onOpenPayment={(url, kind) => ...}>`: open the payment

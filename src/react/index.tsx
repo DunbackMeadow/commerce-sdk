@@ -11,13 +11,26 @@
  */
 
 import React, { useState } from "react";
-import type { CateringOption, CateringServiceStyle, Cuisine, CuisineId, Order, Price, RestaurantSummary } from "../types.js";
+import type { CateringOption, CateringServiceStyle, Cuisine, CuisineId, DrinkType, DrinkTypeId, Order, Price, RestaurantSummary } from "../types.js";
 import type { DunbackEventSettings } from "../luma.js";
 
 const money = (n: number) => `$${Number(n || 0).toFixed(2)}`;
 const SERVICE_STYLES: Array<{ id: CateringServiceStyle; label: string; hint: string }> = [
   { id: "meal_boxes", label: "Individual meal boxes", hint: "(one packed meal per guest; guests pick their own)" },
   { id: "buffet", label: "Buffet", hint: "(trays and platters to share)" },
+];
+
+// The same two styles for a drinks-only order.
+const DRINK_STYLES: Array<{ id: CateringServiceStyle; label: string; hint: string }> = [
+  { id: "meal_boxes", label: "Individual drinks", hint: "(one cup per guest)" },
+  { id: "buffet", label: "Shared containers", hint: "(carafes and gallons to pour from)" },
+];
+
+// Shown when the drinkTypes prop isn't passed (the same ids as dunback.listDrinkTypes()).
+const DEFAULT_DRINK_TYPES: DrinkType[] = [
+  { id: "coffee", label: "Coffee" }, { id: "tea", label: "Tea" }, { id: "milk_tea", label: "Milk tea" },
+  { id: "boba", label: "Boba (bubble tea)" }, { id: "fruit_tea", label: "Fruit tea" }, { id: "smoothie", label: "Smoothies & slushes" },
+  { id: "juice", label: "Juice & lemonade" }, { id: "soda", label: "Soda & sparkling" }, { id: "hot_chocolate", label: "Hot chocolate" },
 ];
 
 /** 24 -> "24 hours", 72 -> "3 days". */
@@ -66,10 +79,16 @@ export interface DunbackCateringSettingsProps {
    * restaurant, the cuisine picker is hidden: the restaurant settles it.
    */
   restaurants?: RestaurantSummary[];
+  /**
+   * From your backend: dunback.listDrinkTypes(). Offered as "Which drinks?"
+   * for a drinks-only order and for the drinks with food. Defaults to the
+   * standard types.
+   */
+  drinkTypes?: DrinkType[];
   className?: string;
 }
 
-export function DunbackCateringSettings({ cuisines, value, onChange, venueReady, metroName, askExpectedGuests = true, restaurants = [], className }: DunbackCateringSettingsProps) {
+export function DunbackCateringSettings({ cuisines, value, onChange, venueReady, metroName, askExpectedGuests = true, restaurants = [], drinkTypes = DEFAULT_DRINK_TYPES, className }: DunbackCateringSettingsProps) {
   const enabled = !!value?.enabled;
   const showAvailability = venueReady !== false;
   const firstAvailable = (showAvailability ? cuisines.find((c) => c.restaurants > 0)?.id : null) || cuisines[0]?.id || "american";
@@ -120,8 +139,29 @@ export function DunbackCateringSettings({ cuisines, value, onChange, venueReady,
         // Indented to line up with the title above (checkbox 16 + gap 10).
         <div style={{ display: "grid", gap: 14, marginTop: 14, paddingLeft: 26 }}>
           <fieldset style={{ border: 0, padding: 0, margin: 0, display: "grid", gap: 6 }}>
-            <legend style={{ ...field, padding: 0, marginBottom: 4 }}>How should food be served?</legend>
-            {SERVICE_STYLES.map((s) => (
+            <legend style={{ ...field, padding: 0, marginBottom: 4 }}>What should we order?</legend>
+            {[
+              { drinks: false, label: "Food", hint: "(with or without drinks)" },
+              { drinks: true, label: "Drinks only", hint: "(coffee, tea, boba... from a cafe or drink shop)" },
+            ].map((k) => (
+              <label key={k.label} style={{ ...checkRow, alignItems: "flex-start" }}>
+                <input
+                  type="radio"
+                  name="dunback-order-kind"
+                  style={{ ...checkbox, marginTop: 2 }}
+                  checked={!!value.drinksOnly === k.drinks}
+                  // Drinks only: no cuisine. Back to food: the cuisine returns (unless a restaurant is named).
+                  onChange={() => onChange(k.drinks
+                    ? { ...value, drinksOnly: true, cuisine: undefined }
+                    : { ...value, drinksOnly: false, cuisine: value.restaurantName?.trim() ? undefined : value.cuisine || firstAvailable })}
+                />
+                <span>{k.label} <span style={hint}>{k.hint}</span></span>
+              </label>
+            ))}
+          </fieldset>
+          <fieldset style={{ border: 0, padding: 0, margin: 0, display: "grid", gap: 6 }}>
+            <legend style={{ ...field, padding: 0, marginBottom: 4 }}>{value.drinksOnly ? "How should drinks be served?" : "How should food be served?"}</legend>
+            {(value.drinksOnly ? DRINK_STYLES : SERVICE_STYLES).map((s) => (
               <label key={s.id} style={{ ...checkRow, alignItems: "flex-start" }}>
                 <input
                   type="radio"
@@ -146,7 +186,7 @@ export function DunbackCateringSettings({ cuisines, value, onChange, venueReady,
                 // A named restaurant replaces the cuisine; clearing it brings the cuisine back.
                 onChange(name.trim()
                   ? { ...value, restaurantName: name, cuisine: undefined }
-                  : { ...value, restaurantName: undefined, cuisine: value.cuisine || firstAvailable });
+                  : { ...value, restaurantName: undefined, cuisine: value.drinksOnly ? undefined : value.cuisine || firstAvailable });
               }}
             />
             {restaurants.length > 0 && (
@@ -159,10 +199,10 @@ export function DunbackCateringSettings({ cuisines, value, onChange, venueReady,
             <span style={hint}>
               {value.restaurantName?.trim()
                 ? "All catering options will come from this restaurant. If it can't cater your event, you'll see why, with options from other restaurants."
-                : "Leave empty to choose a cuisine instead."}
+                : value.drinksOnly ? "Leave empty for any cafe or drink shop serving the drinks you pick." : "Leave empty to choose a cuisine instead."}
             </span>
           </label>
-          {!value.restaurantName?.trim() && (
+          {!value.restaurantName?.trim() && !value.drinksOnly && (
           <label style={field}>
             Cuisine
             <select style={control} value={value.cuisine || ""} onChange={(e) => onChange({ ...value, cuisine: e.target.value as CuisineId })}>
@@ -205,15 +245,44 @@ export function DunbackCateringSettings({ cuisines, value, onChange, venueReady,
               </span>
             </label>
           )}
-          <label style={checkRow}>
-            <input
-              type="checkbox"
-              style={checkbox}
-              checked={value.includeDrinks ?? true}
-              onChange={(e) => onChange({ ...value, includeDrinks: e.target.checked })}
-            />
-            <span>Include drinks <span style={hint}>(non-alcoholic, one per guest)</span></span>
-          </label>
+          {!value.drinksOnly && (
+            <label style={checkRow}>
+              <input
+                type="checkbox"
+                style={checkbox}
+                checked={value.includeDrinks ?? true}
+                onChange={(e) => onChange({ ...value, includeDrinks: e.target.checked })}
+              />
+              <span>Include drinks <span style={hint}>(non-alcoholic, one per guest)</span></span>
+            </label>
+          )}
+          {(value.drinksOnly || (value.includeDrinks ?? true)) && (
+            <fieldset style={{ border: 0, padding: 0, margin: 0, display: "grid", gap: 6 }}>
+              <legend style={{ ...field, padding: 0, marginBottom: 4 }}>
+                Which drinks? <span style={hint}>(optional{value.drinksOnly ? "; guests are shared among the ones you pick" : ""})</span>
+              </legend>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px" }}>
+                {drinkTypes.map((t) => {
+                  const on = (value.drinkTypes || []).includes(t.id as DrinkTypeId);
+                  return (
+                    <label key={t.id} style={checkRow}>
+                      <input
+                        type="checkbox"
+                        style={checkbox}
+                        checked={on}
+                        onChange={() => {
+                          const next = on ? (value.drinkTypes || []).filter((x) => x !== t.id) : [...(value.drinkTypes || []), t.id as DrinkTypeId];
+                          onChange({ ...value, drinkTypes: next.length ? next : undefined });
+                        }}
+                      />
+                      <span>{t.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <span style={hint}>Each option mixes the restaurant&apos;s own choices, like sweetness and toppings.</span>
+            </fieldset>
+          )}
           <label style={field}>
             <span>Budget per guest <span style={hint}>(optional)</span></span>
             <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400 }}>

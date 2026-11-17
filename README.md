@@ -199,7 +199,7 @@ app.post("/webhooks/dunback", express.raw({ type: "application/json" }), (req, r
 | Event | `data` |
 | --- | --- |
 | `catering.options_ready`, `catering.no_options`, `catering.failed` | CateringRequest |
-| `order.created`, `order.confirmed`, `order.payment_failed`, `order.expired`, `order.failed`, `order.needs_attention`, `order.cancelled`, `order.refunded`, `order.delivery_updated` | Order |
+| `order.created`, `order.confirmed`, `order.payment_failed`, `order.expired`, `order.failed`, `order.needs_attention`, `order.cancelled`, `order.refunded`, `order.delivery_updated`, `order.revised` | Order |
 | `ping` | `{ object: "ping", appId, message }`: sent by **Send test event** in the dashboard |
 
 Each webhook is signed as `t=<unix>,v1=<HMAC-SHA256(secret, "<t>.<body>")>`.

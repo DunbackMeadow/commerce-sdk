@@ -197,6 +197,8 @@ per tray, so 2 trays with `serves: 8` feed 16 guests.
 | `unfedGuests[]` | `{ constraint, guests: [names], what? }`: guests with no dish known to be safe |
 | `price` | See Price |
 | `withinBudget` | Present when a budget was set |
+| `acceptsCard` | `false` when the restaurant hasn't set up card payments on Dunback (its Stripe account): the option can then only be paid in USDC |
+| `paymentMethods` | `["stripe","usdc"]`, or `["usdc"]` when `acceptsCard` is false |
 | `orderBy` | ISO; latest payment time the restaurant accepts |
 
 ### Price
@@ -205,7 +207,7 @@ per tray, so 2 trays with `serves: 8` feed 16 guests.
 | --- | --- |
 | `currency` | `"USD"` |
 | `lines[]` | `{ code, label, amount }`. `code` is `food`, `delivery`, `restaurant_fee`, `tax`, `platform_fee` or `service_fee`. |
-| `dunbackServiceFee` | The host's service fee: `serviceFeeRate` × food and drinks |
+| `dunbackServiceFee` | The host's service fee: `serviceFeeRate` × (food and drinks + the restaurant's service charge). Delivery and tax are not included. |
 | `serviceFeeRate` | Dunback's service fee rate on catering orders (`0.05` = 5%) |
 | `totals` | `{ usdc, card, cardProcessingFee }` |
 | `perGuest` | `{ usdc, card }` |
@@ -218,7 +220,7 @@ The card total is the USDC total grossed up for card processing.
 | --- | --- |
 | `optionId` | required |
 | `payer` | `{ name?, email? }` (pre-fills Stripe) |
-| `paymentMethods` | `["stripe","usdc"]` (default both) |
+| `paymentMethods` | `["stripe","usdc"]` (default both). `stripe` is left out when the option's `acceptsCard` is false. |
 | `successUrl`, `cancelUrl` | Stripe return URLs: https, on your registered hosts. The hosted payment page links back to them ("Back to the event": `cancelUrl` before payment, `successUrl` after) |
 
 Errors:
@@ -227,6 +229,7 @@ Errors:
 | --- | --- | --- |
 | 409 | `invalid_state` | Already selected, or not ready |
 | 409 | `order_deadline_passed` | Too late for the restaurant to make the event time |
+| 409 | `card_payments_unavailable` | Only `stripe` was asked for, and this restaurant can't take card payments (`acceptsCard: false`). Offer USDC or another option. |
 | 409 | `restaurant_*` | The restaurant can't take it now |
 
 ---
@@ -244,7 +247,7 @@ Errors:
 | `delivery` | `{ address: {address1, address2, city, state, zip, country}, onsiteContact: {name, phone}, deliveryNotes, editable }`. `deliveryNotes` is your note only. `editable` is true while the order is `AWAITING_PAYMENT`. |
 | `items`, `allergyCoverage`, `unfedGuests`, `price` | Same shapes as the option |
 | `payment` | See below |
-| `fulfillment` | `{ restaurantOrderIds, providerPayment: { amount, payTo, txHash, verifiedOnChain, network }, confirmedAt }` |
+| `fulfillment` | `{ restaurantOrderIds, providerPayment, confirmedAt }`. `providerPayment` is how Dunback paid the restaurant: `{ method: "usdc_x402", amount, payTo, txHash, verifiedOnChain, network }` for a USDC order, or `{ method: "stripe_connect", status: "PAID"\|"PENDING" }` for a card order (paid through the restaurant's own Stripe account) |
 | `refund` | The latest refund: `{ status: "SUCCEEDED"\|"PENDING", method, amount, note? }` |
 | `refunds` | Every refund: `[{ amount, method, status, reason, detail, at, restaurantOrderId? }]`. `reason` is `cancel`, `failed`, `cancelled` (by the restaurant), `late` or `not_delivered` |
 | `cancellation` | The cancellation and refund policy as it applies now; see Cancellation and refund policy |

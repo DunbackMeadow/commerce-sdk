@@ -54,6 +54,22 @@ describe("luma helpers", () => {
     expect(buildCateringRequest({ event, guests, settings: { enabled: true, cuisine: "mexican", serviceStyle: "buffet" }, host: { name: "Sam", email: "sam@x.com", phone: "+15550000000" } }).serviceStyle).toBe("buffet");
   });
 
+  it("builds a drinks-only request without a cuisine", () => {
+    const host = { name: "Sam", email: "sam@x.com", phone: "+15550000000" };
+    const r = buildCateringRequest({ event, guests, settings: { enabled: true, drinksOnly: true, drinkTypes: ["boba", "coffee"] }, host });
+    expect(r.drinksOnly).toBe(true);
+    expect(r.drinkTypes).toEqual(["boba", "coffee"]);
+    expect(r.cuisine).toBeUndefined();
+    expect(r.includeDrinks).toBeUndefined();
+    // A named drink shop works too.
+    expect(buildCateringRequest({ event, guests, settings: { enabled: true, drinksOnly: true, restaurantName: "Pearl & Bean" }, host }).restaurantName).toBe("Pearl & Bean");
+    // Food without drinks, and drink types for the drinks with food.
+    const food = buildCateringRequest({ event, guests, settings: { enabled: true, cuisine: "thai", includeDrinks: false }, host });
+    expect(food.includeDrinks).toBe(false);
+    expect(food.drinksOnly).toBeUndefined();
+    expect(buildCateringRequest({ event, guests, settings: { enabled: true, cuisine: "thai", drinkTypes: ["tea"] }, host }).drinkTypes).toEqual(["tea"]);
+  });
+
   it("refuses online events and missing on-site phone", () => {
     expect(() => buildCateringRequest({ event: { ...event, geo_address_json: null }, guests, settings: { enabled: true, cuisine: "thai" }, host: { name: "S", email: "s@x.com", phone: "1" } })).toThrow(/street address/);
     expect(() => buildCateringRequest({ event, guests, settings: { enabled: true, cuisine: "thai" }, host: { name: "S", email: "s@x.com" } })).toThrow(/on-site contact/);

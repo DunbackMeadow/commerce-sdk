@@ -14,7 +14,7 @@
  * pass whatever has the same field names, or map to `Attendee` yourself.
  */
 
-import type { Address, Attendee, CateringRequestInput, CateringServiceStyle, CuisineId, VenueLocation } from "./types.js";
+import type { Address, Attendee, CateringRequestInput, CateringServiceStyle, CuisineId, DrinkTypeId, VenueLocation } from "./types.js";
 
 /** Stored with a Luma event when the host enables Dunback catering. */
 export interface DunbackEventSettings {
@@ -24,14 +24,22 @@ export interface DunbackEventSettings {
    * a cuisine picker: the restaurant settles it, and all options come from it.
    */
   restaurantName?: string;
-  /** Required when no restaurantName is set. */
+  /** Required when no restaurantName is set, unless drinksOnly. */
   cuisine?: CuisineId;
+  /**
+   * Drinks only, no food (coffee for a morning meetup, boba for a study
+   * group): from restaurantName, or any restaurant serving drinkTypes. No cuisine.
+   */
+  drinksOnly?: boolean;
+  /** Which drinks ("coffee", "boba"...; listDrinkTypes()). With food, the drinks come from these types. */
+  drinkTypes?: DrinkTypeId[];
   /**
    * Buffet (trays to share) or individual meal boxes. Pass it to
    * listCuisines(venue, { serviceStyle }) too: fewer restaurants offer buffets.
    * Default "meal_boxes".
    */
   serviceStyle?: CateringServiceStyle;
+  /** Food catering: also one drink per guest. Default true. */
   includeDrinks?: boolean;
   budgetPerGuest?: number;
   /**
@@ -212,7 +220,7 @@ export interface BuildCateringRequestArgs {
 export function buildCateringRequest(args: BuildCateringRequestArgs): CateringRequestInput {
   const { event, guests, settings, host } = args;
   if (!settings?.enabled) throw new Error("Dunback catering is not enabled for this event.");
-  if (!settings.restaurantName && !settings.cuisine) throw new Error("Choose a restaurant or a cuisine for the catering.");
+  if (!settings.drinksOnly && !settings.restaurantName && !settings.cuisine) throw new Error("Choose a restaurant or a cuisine for the catering.");
   const onsite = args.onsiteContact || settings.onsiteContact || (host.phone ? { name: host.name, phone: host.phone, email: host.email } : null);
   if (!onsite) throw new Error("An on-site contact with a phone number is required for delivery.");
   const attendees = [...toDunbackAttendees(guests), ...(args.extraAttendees || [])];
@@ -222,9 +230,10 @@ export function buildCateringRequest(args: BuildCateringRequestArgs): CateringRe
     partnerReference: `luma:${event.api_id || event.id}`,
     event: { name: event.name, startsAt: event.start_at, timeZone: event.timezone, ...(event.url ? { url: event.url } : {}) },
     ...(settings.deliveryDeadlineLocal ? { deliveryDeadlineLocal: settings.deliveryDeadlineLocal } : {}),
-    ...(settings.restaurantName ? { restaurantName: settings.restaurantName } : { cuisine: settings.cuisine }),
+    ...(settings.restaurantName ? { restaurantName: settings.restaurantName } : settings.drinksOnly ? {} : { cuisine: settings.cuisine }),
     serviceStyle: settings.serviceStyle ?? "meal_boxes",
-    includeDrinks: settings.includeDrinks ?? true,
+    ...(settings.drinksOnly ? { drinksOnly: true } : { includeDrinks: settings.includeDrinks ?? true }),
+    ...(settings.drinkTypes?.length ? { drinkTypes: settings.drinkTypes } : {}),
     ...(settings.budgetPerGuest ? { budgetPerGuest: settings.budgetPerGuest } : {}),
     deliveryAddress: args.deliveryAddress || toDunbackAddress(event.geo_address_json),
     onsiteContact: onsite,

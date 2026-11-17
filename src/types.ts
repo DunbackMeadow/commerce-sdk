@@ -166,8 +166,22 @@ export interface CateringRequestInput {
   secondaryCuisine?: CuisineId;
   /** Buffet (trays to share) or individual meal boxes. Default "meal_boxes". */
   serviceStyle?: CateringServiceStyle;
-  /** Non-alcoholic drinks, one per guest. Default true. */
+  /** Food catering: also non-alcoholic drinks, one per guest. Default true. */
   includeDrinks?: boolean;
+  /**
+   * Drinks only, no food, one drink per guest: from `restaurantName` (a cafe,
+   * a boba shop...) or any restaurant serving `drinkTypes`. Don't send a
+   * cuisine with it. `serviceStyle` "meal_boxes" = individual cups, "buffet" =
+   * shared containers (carafes, gallons). Default false.
+   */
+  drinksOnly?: boolean;
+  /**
+   * Which drinks: ids from `listDrinkTypes()` ("coffee", "boba", "milk_tea"...)
+   * or a short word for any other ("horchata"). Up to 8. With `drinksOnly`,
+   * only restaurants serving them are matched and guests are shared among the
+   * types; with food, the drinks come from these types when the restaurant has them.
+   */
+  drinkTypes?: DrinkTypeId[];
   /** Options above this card price per guest are flagged `withinBudget: false`. */
   budgetPerGuest?: number;
   deliveryAddress: Address;
@@ -176,6 +190,16 @@ export interface CateringRequestInput {
   deliveryNotes?: string;
   host: { name: string; email: string; phone?: string };
   attendees: Attendee[];
+}
+
+/** A drink type from `listDrinkTypes()`, or any short word ("horchata"). */
+export type DrinkTypeId =
+  | "coffee" | "tea" | "milk_tea" | "boba" | "fruit_tea" | "smoothie" | "juice" | "soda" | "hot_chocolate" | "water"
+  | (string & {});
+
+export interface DrinkType {
+  id: DrinkTypeId;
+  label: string;
 }
 
 export interface PriceLine {
@@ -190,7 +214,7 @@ export interface PriceLine {
 export interface Price {
   currency: "USD";
   lines: PriceLine[];
-  /** The host's service fee: serviceFeeRate x food and drinks (the `service_fee` line). */
+  /** The host's service fee: serviceFeeRate x (food and drinks + the restaurant's service charge) (the `service_fee` line). */
   dunbackServiceFee: number;
   /** Dunback's service fee rate on catering orders (0.05 = 5%). */
   serviceFeeRate: number;
@@ -224,6 +248,12 @@ export interface CateringItem {
   dietaryTags: string[];
   /** true for a shared dish added so the order reaches the restaurant's minimum. */
   addedForMinimum?: boolean;
+  /**
+   * A drink's choices, from the restaurant's own options: ["Sweetness: 50%",
+   * "Toppings: Boba"]. Each option mixes them differently (favorites: the
+   * restaurant's defaults; value: no paid add-ons; variety: several versions).
+   */
+  modifiers?: string[];
 }
 
 export interface AllergyCoverage {
@@ -256,6 +286,14 @@ export interface CateringOption {
   unfedGuests: UnfedGuests[];
   price: Price;
   withinBudget?: boolean;
+  /**
+   * false when this restaurant hasn't set up card payments on Dunback (its
+   * Stripe account): the option can then only be paid in USDC, and selecting
+   * it with paymentMethods ["stripe"] fails with card_payments_unavailable.
+   */
+  acceptsCard: boolean;
+  /** How this option can be paid: ["stripe", "usdc"], or ["usdc"] when acceptsCard is false. */
+  paymentMethods: Array<"stripe" | "usdc">;
   /** Pay before this instant (ISO), or the restaurant can't make the event time. */
   orderBy: string | null;
   /** Dunback's catering cancellation and refund policy, in one paragraph. Show it with the option. */
@@ -280,6 +318,10 @@ export interface CateringRequest {
    */
   restaurant: { requested: string; found: boolean | null; name: string | null; available: boolean | null; reason: string | null } | null;
   serviceStyle: CateringServiceStyle;
+  /** Drinks only, no food. */
+  drinksOnly: boolean;
+  includeDrinks: boolean;
+  drinkTypes: DrinkType[];
   guestCount: number;
   deliveryDeadlineLocal: string;
   timeZone: string;
@@ -375,7 +417,15 @@ export interface Order {
   timeZone: string;
   guestCount: number;
   delivery: OrderDelivery;
+  /** What was priced and paid for. */
   items: CateringItem[];
+  /**
+   * Set when the restaurant changed the order after calling the host and
+   * getting their agreement (webhook `order.revised`). `revision.items` is
+   * what it will now prepare. The price never changes with a revision.
+   * Show the note and the revised items to the host.
+   */
+  revision: OrderRevision | null;
   allergyCoverage: AllergyCoverage[];
   unfedGuests: UnfedGuests[];
   price: Price;
@@ -390,7 +440,14 @@ export interface Order {
   };
   fulfillment: {
     restaurantOrderIds: string[];
-    providerPayment: { amount: number; payTo: string; txHash: string | null; verifiedOnChain: boolean; network: "polygon" };
+    /**
+     * How Dunback paid the restaurant: in USDC on Polygon for a USDC/x402 order,
+     * or through the restaurant's Stripe account for a card order (details
+     * of a card payout are not shared).
+     */
+    providerPayment:
+      | { method?: "usdc_x402"; amount: number; payTo: string; txHash: string | null; verifiedOnChain: boolean; network: "polygon" }
+      | { method: "stripe_connect"; status: "PAID" | "PENDING" };
     confirmedAt: string;
   } | null;
   /** The latest refund. */
@@ -502,11 +559,22 @@ export interface RefundDecidedData extends Order {
   };
 }
 
+export interface OrderRevision {
+  /** "Revised by restaurant with user agreement." */
+  note: string;
+  revisedAt: string;
+  /** The restaurant's reason, as told to the host. */
+  reason: string;
+  items: Array<{ name: string; quantity: number; modifiers: string[] }>;
+  history: Array<{ revisedAt: string; reason: string }>;
+}
+
 export type WebhookEventType =
   | "catering.options_ready" | "catering.no_options" | "catering.failed"
   | "order.created" | "order.confirmed" | "order.payment_failed" | "order.expired"
   | "order.failed" | "order.needs_attention" | "order.cancelled" | "order.refunded"
   | "order.refund_decided" | "order.delivered_late" | "order.delivery_updated"
+  | "order.revised"
   | "ping";
 
 /** `data` of a `ping` event, sent by "Send test event" in the Developer Dashboard. */

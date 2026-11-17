@@ -1,7 +1,20 @@
 import { DunbackApiError } from "./errors.js";
 import type {
-  AppInfo, CancelOrderOptions, CateringRequest, RestaurantSummary, LateRefundRequest, LateRefundRequestInput, CateringRequestInput, Cuisine, CuisineCatalog, CuisineQuery, Order, SelectOptionInput, UpdateDeliveryInput,
+  AppInfo,
+  CancelOrderOptions,
+  CateringRequest,
+  RestaurantSummary,
+  LateRefundRequest,
+  LateRefundRequestInput,
+  CateringRequestInput,
+  Cuisine,
+  CuisineCatalog,
+  CuisineQuery,
+  Order,
+  SelectOptionInput,
+  UpdateDeliveryInput,
   VenueLocation,
+  DrinkType,
 } from "./types.js";
 
 export interface DunbackClientOptions {
@@ -123,6 +136,15 @@ export class DunbackClient {
     if (q.trim()) p.set("q", q.trim());
     const qs = p.toString();
     return (await this.request<{ data: RestaurantSummary[] }>("GET", `/catalog/restaurants${qs ? `?${qs}` : ""}`)).data;
+  }
+
+  /**
+   * Drink types a host can ask for (`drinkTypes` on a catering request), for
+   * drinks-only catering or the drinks with food. Any other short word works
+   * too and is matched against the restaurants' drink names.
+   */
+  async listDrinkTypes(): Promise<DrinkType[]> {
+    return (await this.request<{ data: DrinkType[] }>("GET", "/catalog/drink-types")).data;
   }
 
   /** listCuisines() plus which metro area the counts are for (`metro` is null when Dunback doesn't serve the venue's area). */
