@@ -1,4 +1,33 @@
-# Changelog
+﻿# Changelog
+
+## 0.10.0
+
+- Catering requests can say more about the food:
+  - `dishPreferences` ("sushi", "seafood", "pastries", "bagels"...): the mains
+    come from matching dishes; no cuisine needed. Items gain `matches`.
+  - `mealType` ("breakfast" | "lunch" | "dinner"): the kind of food, whatever
+    the delivery time ("breakfast" = pastries, bagels, egg dishes...). No
+    cuisine needed for breakfast. A morning delivery without it now prefers
+    breakfast food.
+  - `spicyShare` (0..1, 0 = nothing spicy). Options gain `spicyServings` /
+    `mainServings`; items gain `spicy`.
+  - `partyDiet` (["vegetarian"], ["halal"]...): every guest's food fits.
+  - `allergyCoverage[].outsidePreferences`: guests none of the asked-for
+    dishes is safe for (they get other safe dishes).
+- Hard budget: `maxTotal` / `maxPerGuest`. Options above it aren't offered;
+  `CateringRequest.budget` says what it did, and `budget.message` how far to
+  raise it for three options. `budgetPerGuest` stays a soft flag.
+- When an option can't be made (the restaurant declines, it's under its
+  minimum, or over the budget), Dunback now tries other restaurants and
+  strategies, so hosts get three options more often. Each option is still
+  from one restaurant.
+- `unavailableReasons[].code` gains `no_matching_dishes` and `over_budget`.
+- `buildCateringRequest` / `DunbackEventSettings` pass the new fields.
+- `restaurantName` tolerates small misspellings ("Ragoon Ruby" finds "Rangoon
+  Ruby"), used only when no restaurant matches the name exactly or in part.
+  Part of a name matches every location ("Rangoon Ruby" -> its Palo Alto and
+  San Carlos restaurants). `CateringRequest.restaurant.closeMatch` is true when
+  the restaurant was found by its closest spelling.
 
 ## 0.9.0
 
@@ -185,7 +214,7 @@
 - API keys now come from the Dunback Developer Dashboard
   (<https://dunbackmeadow.com/developer>): one app per product, with one
   sandbox key and one production key each. Keys look like
-  `dbk_test_<appId>_…` / `dbk_live_<appId>_…`.
+  `dbk_test_<appId>_â€¦` / `dbk_live_<appId>_â€¦`.
 - `DunbackClient` picks the base URL from the key: the sandbox for
   `dbk_test_`, production for `dbk_live_`. `baseUrl` still overrides it.
 - New `client.mode` and `client.appId`, read from the key.

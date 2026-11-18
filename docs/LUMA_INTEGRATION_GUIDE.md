@@ -96,6 +96,12 @@ type DunbackEventSettings = {
   serviceStyle?: "buffet" | "meal_boxes"; // default "meal_boxes"
   includeDrinks?: boolean; // default true (non-alcoholic only)
   budgetPerGuest?: number; // USD; options above it are flagged, not hidden
+  maxTotal?: number; // USD, hard: options above it aren't offered; show request.budget.message
+  maxPerGuest?: number; // USD per guest, hard
+  dishPreferences?: string[]; // "sushi", "seafood", "pastries", "bagels"... (no cuisine needed)
+  mealType?: "breakfast" | "lunch" | "dinner"; // "breakfast": pastries, bagels, eggs... whatever the time
+  spicyShare?: number; // 0..1 of the main servings spicy; 0 = nothing spicy
+  partyDiet?: ("vegetarian" | "vegan" | "halal" | "kosher" | "gluten_free" | "dairy_free" | "pescatarian")[];
   guestListDeadline?: string; // ISO; "Order Food" is offered from then on
   deliveryDeadlineLocal?: string; // default: 30 min before start, venue-local "YYYY-MM-DDTHH:mm"
   deliveryNotes?: string; // "Loading dock on Emerson St"

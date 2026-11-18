@@ -106,11 +106,17 @@ serves them. Hosts can pick them like any other: send the `id` as `cuisine`.
 | `event.timeZone` | IANA, required | Venue time zone |
 | `event.url` | URL | |
 | `deliveryDeadlineLocal` | `YYYY-MM-DDTHH:mm` | Default: `startsAt` minus 30 min, venue-local |
-| `restaurantName` | string | A restaurant the host prefers (`/catalog/restaurants`): all options come from it. Send it or `cuisine`, not both. If it can't cater, `restaurant.available` is false and `restaurant.reason` says why; the options are from other restaurants |
-| `cuisine` | cuisine id, required without `restaurantName` | A standard id or a `custom:…` id from `/catalog/cuisines` |
+| `restaurantName` | string | A restaurant the host prefers (`/catalog/restaurants`): all options come from it. Part of a name matches every location; small misspellings are tolerated when no restaurant matches exactly (`restaurant.closeMatch: true`). Send it or `cuisine`, not both. If it can't cater, `restaurant.available` is false and `restaurant.reason` says why; the options are from other restaurants |
+| `cuisine` | cuisine id | A standard id or a `custom:…` id from `/catalog/cuisines`. Required unless you send `restaurantName`, `dishPreferences` or `mealType: "breakfast"` (then any cuisine) |
 | `serviceStyle` | `buffet` or `meal_boxes` | How food is served. `buffet`: trays and platters to share, from restaurants with catering dishes. `meal_boxes`: one packed meal per guest from restaurants' regular dishes (more dishes, usually more restaurants). Default `meal_boxes`. |
 | `includeDrinks` | bool | Default true. Non-alcoholic only. |
-| `budgetPerGuest` | number | Flags options above it |
+| `dishPreferences` | string[], up to 8 | Kinds of dishes the host wants: `"sushi"`, `"seafood"`, `"pastries"`, `"bagels"`, `"tacos"`… The mains come from dishes that match (name, description, category, tags; `"seafood"` also by a fish or shellfish allergen), and only restaurants with such dishes take part. A guest none of them is safe for gets another safe main (`allergyCoverage[].outsidePreferences: true`) |
+| `mealType` | `breakfast`, `lunch` or `dinner` | The kind of food, whatever the delivery time. Breakfast food: dishes in the restaurant's breakfast or brunch menu, or that read like breakfast (pastries, bagels, egg dishes, oatmeal, fruit platters…). Without it, a delivery before 10:30 prefers breakfast food without requiring it |
+| `spicyShare` | number 0–1 | About this share of the main servings spicy (`0.33` = a third; `0` = nothing spicy). Spicy: the restaurant's spice level 2 or more, or, without a level, the dish's wording ("spicy", "Sichuan", "jalapeño"…) |
+| `partyDiet` | array of `vegetarian`, `vegan`, `halal`, `kosher`, `gluten_free`, `dairy_free`, `pescatarian` | Every guest's food must fit, as if each guest had said so (an all-vegetarian event) |
+| `maxTotal` | number, USD | Hard budget for the order: options priced above it are not offered. Compared with what the host would pay (the card total; the USDC total at a restaurant that takes no card). See `budget` below |
+| `maxPerGuest` | number, USD | Hard budget per guest, like `maxTotal` |
+| `budgetPerGuest` | number | Soft: only flags options above it (`withinBudget: false`) |
 | `deliveryAddress` | `{address1, address2?, city, state?, zip, country?}`, required | |
 | `onsiteContact` | `{name, phone, email?}`, required | Receives the delivery |
 | `deliveryNotes` | string | |
@@ -147,10 +153,12 @@ Composing usually takes 5–30 s. When it finishes, you receive the
 | `object` | `"catering_request"` |
 | `status` | `COMPOSING`, `OPTIONS_READY`, `NO_OPTIONS`, `SELECTED` or `FAILED` |
 | `partnerReference`, `event`, `cuisine`, `guestCount` | As sent; `event` gains `startsAtLocal` |
+| `dishPreferences`, `mealType`, `spicyShare`, `partyDiet`, `maxTotal`, `maxPerGuest` | As sent (`[]` / `null` when not) |
+| `budget` | With `maxTotal` / `maxPerGuest` only: `{ maxTotal, maxPerGuest, limit, withinBudget, overBudget, suggestedMaxTotal, suggestedMaxPerGuest, message }`. When the budget leaves fewer than three options, `message` says so and how far to raise it for three ("Only 2 catering offers fit your budget of $1,000. Raising your budget to about $1,150 would give you 3 offers to choose from."). **Show `message` to the host.** |
 | `deliveryDeadlineLocal`, `timeZone`, `daypart` | |
 | `allergySummary` | `[{ constraint, guests: [names] }]` |
-| `options` | Up to 3; see below |
-| `unavailableReasons` | `[{ name, code, reason }]` when `NO_OPTIONS`. `code`: `party_too_large`, `below_minimum_order`, `notice_too_short`, `no_buffet_dishes`, `style_not_offered`, `outside_delivery_area`, `not_serving_then`, `different_cuisine` or `restaurant_declined` (more may be added) |
+| `options` | Up to 3, each from one restaurant; from different restaurants when several can cater. See below |
+| `unavailableReasons` | `[{ name, code, reason }]` when `NO_OPTIONS`. `code`: `party_too_large`, `below_minimum_order`, `notice_too_short`, `no_buffet_dishes`, `style_not_offered`, `outside_delivery_area`, `not_serving_then`, `different_cuisine`, `no_matching_dishes` (none of the dishes asked for), `over_budget` or `restaurant_declined` (more may be added) |
 | `orderId` | Set once an option is selected |
 | `error` | `{ code, message }`, when `FAILED` |
 | `createdAt`, `updatedAt` | |

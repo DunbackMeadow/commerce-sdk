@@ -154,9 +154,10 @@ export interface CateringRequestInput {
    */
   restaurantName?: string;
   /**
-   * Required when no restaurantName is given. Restaurants whose primary
-   * cuisine this is are matched first; restaurants listing it as their
-   * secondary cuisine only when none of those can cater.
+   * Required unless you give restaurantName, dishPreferences or mealType
+   * "breakfast" (then any cuisine). Restaurants whose primary cuisine this is
+   * are matched first; restaurants listing it as their secondary cuisine only
+   * when none of those can cater.
    */
   cuisine?: CuisineId;
   /**
@@ -182,14 +183,65 @@ export interface CateringRequestInput {
    * types; with food, the drinks come from these types when the restaurant has them.
    */
   drinkTypes?: DrinkTypeId[];
-  /** Options above this card price per guest are flagged `withinBudget: false`. */
+  /** Soft: options above this card price per guest are only flagged `withinBudget: false`. */
   budgetPerGuest?: number;
+  /**
+   * Hard budget, USD: options priced above it are not offered. Compared with
+   * what the host would pay: the card total, or the USDC total at a restaurant
+   * that takes no card. When it leaves fewer than three options,
+   * `CateringRequest.budget.message` says how far to raise it for three.
+   */
+  maxTotal?: number;
+  /** Hard budget per guest, USD (see `maxTotal`). */
+  maxPerGuest?: number;
+  /**
+   * Kinds of dishes the host wants, up to 8: "sushi", "seafood", "pastries",
+   * "bagels", "tacos"... The mains come from dishes that match; a guest no
+   * matching dish is safe for gets another safe main (its allergyCoverage
+   * entry says `outsidePreferences: true`). Any cuisine when none is given.
+   */
+  dishPreferences?: string[];
+  /**
+   * The kind of food, whatever the delivery time: "breakfast" (pastries,
+   * bagels, egg dishes, fruit...), "lunch" or "dinner". Without it, a delivery
+   * before 10:30 prefers breakfast food without requiring it.
+   */
+  mealType?: CateringMealType;
+  /** About this share (0..1) of the main servings spicy; 0 = nothing spicy. */
+  spicyShare?: number;
+  /** Diets every guest's food must fit, e.g. ["vegetarian"] for an all-vegetarian event. */
+  partyDiet?: PartyDiet[];
   deliveryAddress: Address;
   /** Who receives the delivery at the venue. */
   onsiteContact: { name: string; phone: string; email?: string };
   deliveryNotes?: string;
   host: { name: string; email: string; phone?: string };
   attendees: Attendee[];
+}
+
+export type CateringMealType = "breakfast" | "lunch" | "dinner";
+
+export type PartyDiet = "vegetarian" | "vegan" | "halal" | "kosher" | "gluten_free" | "dairy_free" | "pescatarian";
+
+/** What a hard budget (`maxTotal` / `maxPerGuest`) did to the options. */
+export interface CateringBudgetResult {
+  maxTotal: number | null;
+  maxPerGuest: number | null;
+  /** The budget for the whole order (the tighter of the two), USD. */
+  limit: number;
+  /** Options offered (all within the budget). */
+  withinBudget: number;
+  /** Options left out for being over the budget. */
+  overBudget: number;
+  /** With fewer than three options: about how far to raise the budget for three (null otherwise). */
+  suggestedMaxTotal: number | null;
+  suggestedMaxPerGuest: number | null;
+  /**
+   * Show this to the host when set, e.g. "Only 2 catering offers fit your
+   * budget of $1,000. Raising your budget to about $1,150 would give you 3
+   * offers to choose from."
+   */
+  message: string | null;
 }
 
 /** A drink type from `listDrinkTypes()`, or any short word ("horchata"). */
@@ -248,6 +300,10 @@ export interface CateringItem {
   dietaryTags: string[];
   /** true for a shared dish added so the order reaches the restaurant's minimum. */
   addedForMinimum?: boolean;
+  /** The request's dishPreferences this dish matches ("sushi"). */
+  matches?: string[];
+  /** true for a spicy main (see spicyShare). */
+  spicy?: boolean;
   /**
    * A drink's choices, from the restaurant's own options: ["Sweetness: 50%",
    * "Toppings: Boba"]. Each option mixes them differently (favorites: the
@@ -261,6 +317,8 @@ export interface AllergyCoverage {
   constraint: string;
   guests: number;
   dishes: string[];
+  /** None of the dishes asked for (dishPreferences / mealType) is safe for these guests: they get other safe dishes. */
+  outsidePreferences?: boolean;
 }
 
 export interface UnfedGuests {
@@ -285,7 +343,11 @@ export interface CateringOption {
   /** Guests no dish on this menu is known to be safe for. Show this to the host. */
   unfedGuests: UnfedGuests[];
   price: Price;
+  /** With budgetPerGuest (soft) or maxTotal / maxPerGuest (hard; always true then). */
   withinBudget?: boolean;
+  /** With spicyShare only: main servings that are spicy, of all main servings. */
+  spicyServings?: number;
+  mainServings?: number;
   /**
    * false when this restaurant hasn't set up card payments on Dunback (its
    * Stripe account): the option can then only be paid in USDC, and selecting
@@ -316,12 +378,29 @@ export interface CateringRequest {
    * cater this event (`reason`), and the options are from other restaurants.
    * `found` false: no restaurant by that name. null fields: still composing.
    */
-  restaurant: { requested: string; found: boolean | null; name: string | null; available: boolean | null; reason: string | null } | null;
+  restaurant: {
+    requested: string;
+    found: boolean | null;
+    /** The restaurant found: may differ from `requested` (part of a name, or a misspelling). */
+    name: string | null;
+    /** true: no restaurant has that name; `name` is the closest spelling found (e.g. "Ragoon Ruby" -> "Rangoon Ruby Palo Alto"). Show the host which restaurant it is. */
+    closeMatch?: boolean;
+    available: boolean | null;
+    reason: string | null;
+  } | null;
   serviceStyle: CateringServiceStyle;
   /** Drinks only, no food. */
   drinksOnly: boolean;
   includeDrinks: boolean;
   drinkTypes: DrinkType[];
+  dishPreferences: string[];
+  mealType: CateringMealType | null;
+  spicyShare: number | null;
+  partyDiet: PartyDiet[];
+  maxTotal: number | null;
+  maxPerGuest: number | null;
+  /** With a hard budget only. Show `budget.message` to the host when it is set. */
+  budget: CateringBudgetResult | null;
   guestCount: number;
   deliveryDeadlineLocal: string;
   timeZone: string;
@@ -346,6 +425,8 @@ export type UnavailableReasonCode =
   | "outside_delivery_area"
   | "not_serving_then"       // closed, or not serving that meal at that time
   | "different_cuisine"
+  | "no_matching_dishes"     // none of the dishes asked for (dishPreferences, mealType, partyDiet)
+  | "over_budget"            // its options are priced above maxTotal / maxPerGuest
   | "restaurant_declined";   // the restaurant couldn't price the order
 
 export interface UnavailableReason {

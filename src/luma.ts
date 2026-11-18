@@ -14,7 +14,7 @@
  * pass whatever has the same field names, or map to `Attendee` yourself.
  */
 
-import type { Address, Attendee, CateringRequestInput, CateringServiceStyle, CuisineId, DrinkTypeId, VenueLocation } from "./types.js";
+import type { Address, Attendee, CateringMealType, CateringRequestInput, CateringServiceStyle, CuisineId, DrinkTypeId, PartyDiet, VenueLocation } from "./types.js";
 
 /** Stored with a Luma event when the host enables Dunback catering. */
 export interface DunbackEventSettings {
@@ -24,7 +24,7 @@ export interface DunbackEventSettings {
    * a cuisine picker: the restaurant settles it, and all options come from it.
    */
   restaurantName?: string;
-  /** Required when no restaurantName is set, unless drinksOnly. */
+  /** Required when no restaurantName is set, unless drinksOnly, dishPreferences or mealType "breakfast". */
   cuisine?: CuisineId;
   /**
    * Drinks only, no food (coffee for a morning meetup, boba for a study
@@ -41,7 +41,19 @@ export interface DunbackEventSettings {
   serviceStyle?: CateringServiceStyle;
   /** Food catering: also one drink per guest. Default true. */
   includeDrinks?: boolean;
+  /** Soft: options above it are flagged withinBudget: false. */
   budgetPerGuest?: number;
+  /** Hard budget (USD): options above it aren't offered (see CateringRequestInput.maxTotal). */
+  maxTotal?: number;
+  maxPerGuest?: number;
+  /** Dishes the host wants: "sushi", "seafood", "pastries", "bagels"... */
+  dishPreferences?: string[];
+  /** "breakfast" for breakfast food (pastries, bagels, eggs...) whatever the time. */
+  mealType?: CateringMealType;
+  /** About this share (0..1) of the main servings spicy; 0 = nothing spicy. */
+  spicyShare?: number;
+  /** Diets every guest's food must fit, e.g. ["vegetarian"]. */
+  partyDiet?: PartyDiet[];
   /**
    * The host's estimate of how many guests will attend (or the event's
    * capacity). Pass it to listCuisines(venue, { guests }) so only cuisines
@@ -220,7 +232,9 @@ export interface BuildCateringRequestArgs {
 export function buildCateringRequest(args: BuildCateringRequestArgs): CateringRequestInput {
   const { event, guests, settings, host } = args;
   if (!settings?.enabled) throw new Error("Dunback catering is not enabled for this event.");
-  if (!settings.drinksOnly && !settings.restaurantName && !settings.cuisine) throw new Error("Choose a restaurant or a cuisine for the catering.");
+  if (!settings.drinksOnly && !settings.restaurantName && !settings.cuisine && !settings.dishPreferences?.length && settings.mealType !== "breakfast") {
+    throw new Error("Choose a restaurant, a cuisine or the dishes you'd like for the catering.");
+  }
   const onsite = args.onsiteContact || settings.onsiteContact || (host.phone ? { name: host.name, phone: host.phone, email: host.email } : null);
   if (!onsite) throw new Error("An on-site contact with a phone number is required for delivery.");
   const attendees = [...toDunbackAttendees(guests), ...(args.extraAttendees || [])];
@@ -230,11 +244,18 @@ export function buildCateringRequest(args: BuildCateringRequestArgs): CateringRe
     partnerReference: `luma:${event.api_id || event.id}`,
     event: { name: event.name, startsAt: event.start_at, timeZone: event.timezone, ...(event.url ? { url: event.url } : {}) },
     ...(settings.deliveryDeadlineLocal ? { deliveryDeadlineLocal: settings.deliveryDeadlineLocal } : {}),
-    ...(settings.restaurantName ? { restaurantName: settings.restaurantName } : settings.drinksOnly ? {} : { cuisine: settings.cuisine }),
+    ...(settings.restaurantName ? { restaurantName: settings.restaurantName } : settings.drinksOnly || !settings.cuisine ? {} : { cuisine: settings.cuisine }),
     serviceStyle: settings.serviceStyle ?? "meal_boxes",
     ...(settings.drinksOnly ? { drinksOnly: true } : { includeDrinks: settings.includeDrinks ?? true }),
     ...(settings.drinkTypes?.length ? { drinkTypes: settings.drinkTypes } : {}),
     ...(settings.budgetPerGuest ? { budgetPerGuest: settings.budgetPerGuest } : {}),
+    ...(settings.maxTotal ? { maxTotal: settings.maxTotal } : {}),
+    ...(settings.maxPerGuest ? { maxPerGuest: settings.maxPerGuest } : {}),
+    // Dish rules are about food: not for a drinks-only order.
+    ...(!settings.drinksOnly && settings.dishPreferences?.length ? { dishPreferences: settings.dishPreferences } : {}),
+    ...(!settings.drinksOnly && settings.mealType ? { mealType: settings.mealType } : {}),
+    ...(!settings.drinksOnly && settings.spicyShare != null ? { spicyShare: settings.spicyShare } : {}),
+    ...(!settings.drinksOnly && settings.partyDiet?.length ? { partyDiet: settings.partyDiet } : {}),
     deliveryAddress: args.deliveryAddress || toDunbackAddress(event.geo_address_json),
     onsiteContact: onsite,
     deliveryNotes: settings.deliveryNotes || "",

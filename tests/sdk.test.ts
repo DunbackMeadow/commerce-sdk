@@ -70,6 +70,31 @@ describe("luma helpers", () => {
     expect(buildCateringRequest({ event, guests, settings: { enabled: true, cuisine: "thai", drinkTypes: ["tea"] }, host }).drinkTypes).toEqual(["tea"]);
   });
 
+  it("passes dish preferences, meal type, spicy share, party diet and a hard budget", () => {
+    const host = { name: "Sam", email: "sam@x.com", phone: "+15550000000" };
+    // Breakfast food needs no cuisine.
+    const breakfast = buildCateringRequest({
+      event, guests, host,
+      settings: { enabled: true, mealType: "breakfast", dishPreferences: ["pastries", "bagels"], maxTotal: 600, partyDiet: ["vegetarian"], spicyShare: 0 },
+    });
+    expect(breakfast.cuisine).toBeUndefined();
+    expect(breakfast.mealType).toBe("breakfast");
+    expect(breakfast.dishPreferences).toEqual(["pastries", "bagels"]);
+    expect(breakfast.maxTotal).toBe(600);
+    expect(breakfast.partyDiet).toEqual(["vegetarian"]);
+    expect(breakfast.spicyShare).toBe(0);
+    // Dishes asked for without a cuisine; a per-guest budget.
+    const sushi = buildCateringRequest({ event, guests, host, settings: { enabled: true, dishPreferences: ["sushi"], maxPerGuest: 25 } });
+    expect(sushi.dishPreferences).toEqual(["sushi"]);
+    expect(sushi.maxPerGuest).toBe(25);
+    // Dish rules are about food: left out of a drinks-only order.
+    const drinks = buildCateringRequest({ event, guests, host, settings: { enabled: true, drinksOnly: true, dishPreferences: ["sushi"], spicyShare: 0.5 } });
+    expect(drinks.dishPreferences).toBeUndefined();
+    expect(drinks.spicyShare).toBeUndefined();
+    // Nothing to go on: a restaurant, a cuisine or dishes is required.
+    expect(() => buildCateringRequest({ event, guests, host, settings: { enabled: true, mealType: "lunch" } })).toThrow(/restaurant, a cuisine or the dishes/);
+  });
+
   it("refuses online events and missing on-site phone", () => {
     expect(() => buildCateringRequest({ event: { ...event, geo_address_json: null }, guests, settings: { enabled: true, cuisine: "thai" }, host: { name: "S", email: "s@x.com", phone: "1" } })).toThrow(/street address/);
     expect(() => buildCateringRequest({ event, guests, settings: { enabled: true, cuisine: "thai" }, host: { name: "S", email: "s@x.com" } })).toThrow(/on-site contact/);
