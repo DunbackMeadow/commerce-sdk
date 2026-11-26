@@ -155,6 +155,26 @@ describe("client", () => {
     expect(err.code).toBe("address_moved");
   });
 
+  it("confirms a delivery and reports a problem", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return calls.length === 1
+        ? new Response(JSON.stringify({ id: "ord_1", object: "order", status: "CONFIRMED", deliveries: [{ restaurantOrderId: "R1", status: "delivered", hostConfirmedAt: "2026-12-02T20:10:00Z", canConfirm: false, canReportProblem: true }] }), { status: 200 })
+        : new Response(JSON.stringify({ object: "problem_report", orderId: "ord_1", reportedAt: "2026-12-02T20:15:00Z", reports: [{ restaurantOrderId: "R1", type: "MISSING_ITEMS", refundRequested: true, refundBasis: "delivery_problem", maximum: 180 }] }), { status: 202 });
+    });
+    const c = new DunbackClient({ apiKey: "dbk_test_luma_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", baseUrl: "https://example.test/v1", fetch: fetchMock as unknown as typeof fetch });
+    const o = await c.orders.confirmDelivery("ord_1", "R1");
+    expect(calls[0].url).toBe("https://example.test/v1/orders/ord_1/deliveries/confirm");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ restaurantOrderId: "R1" });
+    expect(o.deliveries?.[0].hostConfirmedAt).toBeTruthy();
+    const input = { type: "MISSING_ITEMS" as const, description: "Two of the five trays were missing.", wantsRefund: true };
+    const r = await c.orders.reportProblem("ord_1", input);
+    expect(calls[1].url).toBe("https://example.test/v1/orders/ord_1/problem-reports");
+    expect(JSON.parse(String(calls[1].init.body))).toEqual(input);
+    expect(r.reports[0].refundBasis).toBe("delivery_problem");
+  });
+
   it("counts cuisines near a venue", async () => {
     const urls: string[] = [];
     const fetchMock = vi.fn(async (url: string) => {

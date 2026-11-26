@@ -1,4 +1,16 @@
-﻿# Changelog
+# Changelog
+
+## 0.11.0
+
+- Delivery problems: for 48 hours after a delivery, the host can confirm it
+  (`orders.confirmDelivery`) or report a problem (`orders.reportProblem`:
+  type, description, up to 3 photos, optional refund request). The restaurant
+  is told at once; a refund is decided by Dunback (`order.refund_decided`,
+  new basis `"delivery_problem"`).
+- `Order.deliveries`: each delivery's status, time, lateness, who delivered it
+  (`driver`, or a `courier` company the restaurant booked) and who recorded the
+  time, plus `canConfirm` / `canReportProblem`.
+- New webhook `order.delivered` when a delivery is recorded.
 
 ## 0.10.0
 

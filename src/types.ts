@@ -551,6 +551,13 @@ export interface Order {
    * be true: offer "request a refund" (`orders.requestRefund`) only from then.
    */
   lateRefund?: { afterMinutes: number; requestableFrom: string | null };
+  /**
+   * Each restaurant order's delivery. For 48 hours after a delivery is
+   * recorded the host can confirm it (`orders.confirmDelivery`) or report a
+   * problem (`orders.reportProblem`): offer those while `canConfirm` /
+   * `canReportProblem` are true. Webhook `order.delivered` when one is recorded.
+   */
+  deliveries?: OrderDelivery[];
   error: { code: string; message: string } | null;
   createdAt: string;
   updatedAt: string;
@@ -610,6 +617,75 @@ export interface LateRefundRequest {
   requestedAt: string;
 }
 
+export interface OrderDelivery {
+  restaurantOrderId: string;
+  status: "pending" | "on_the_way" | "delivered" | "not_delivered" | "cancelled";
+  deliveredAt: string | null;
+  lateMinutes: number;
+  /** A Dunback or restaurant staff "driver", or a "courier" company the restaurant booked. */
+  deliveredBy: "driver" | "courier" | null;
+  courierCompany: string | null;
+  /**
+   * Who recorded the delivery time: the "driver" or "courier" (Dunback's clock,
+   * with a photo and location), or the "restaurant" (from the courier's proof
+   * of delivery, when the courier didn't record it). Show it with the time.
+   */
+  timeRecordedBy: "driver" | "courier" | "restaurant" | null;
+  hostConfirmedAt: string | null;
+  problemReport: {
+    type: DeliveryProblemType; label: string; description: string; reportedAt: string; wantsRefund: boolean; photoCount: number;
+  } | null;
+  /** 48 hours after delivery. */
+  problemReportableUntil: string | null;
+  canConfirm: boolean;
+  canReportProblem: boolean;
+}
+
+export type DeliveryProblemType =
+  | "MISSING_ITEMS" | "DAMAGED" | "WRONG_ORDER" | "NO_SETUP" | "CONDUCT" | "LATE" | "NOT_RECEIVED" | "OTHER";
+
+/**
+ * orders.reportProblem(): anything wrong with a delivery, within 48 hours of
+ * it. The restaurant is told at once. With `wantsRefund`, Dunback reviews the
+ * report against its records of the delivery and decides the refund (0 up to
+ * the restaurant's part; Dunback's fees aren't refunded): webhook
+ * `order.refund_decided` (basis "delivery_problem", or "late_delivery" for a
+ * LATE report of a delivery recorded as late).
+ */
+export interface ProblemReportInput {
+  /** Which delivery (order.deliveries[].restaurantOrderId); default: every reportable one. */
+  restaurantOrderId?: string;
+  type: DeliveryProblemType;
+  /** What happened, in the host's words (10 to 2000 characters). */
+  description: string;
+  wantsRefund?: boolean;
+  /** Up to 3 photos, 5 MB each, base64 without the data: prefix. */
+  photos?: Array<{ contentType: "image/jpeg" | "image/png" | "image/webp"; data: string }>;
+}
+
+/** 202 from orders.reportProblem(). */
+export interface ProblemReport {
+  object: "problem_report";
+  orderId: string;
+  reportedAt: string;
+  reports: Array<{
+    restaurantOrderId: string;
+    type: DeliveryProblemType;
+    refundRequested: boolean;
+    refundBasis: "delivery_problem" | "late_delivery" | null;
+    /** The most the refund can be: the restaurant's part of that delivery. */
+    maximum: number | null;
+  }>;
+  order: Order;
+}
+
+/** `data` of `order.delivered`: the order, and which deliveries were just recorded. */
+export interface DeliveredData extends Order {
+  deliveredNow: string[];
+  /** How long the host can confirm or report a problem (48). */
+  problemReportHours: number;
+}
+
 /** `data` of `order.delivered_late`: the order, and which deliveries were late. */
 export interface DeliveredLateData extends Order {
   lateDeliveries: Array<{ restaurantOrderId: string; lateMinutes: number }>;
@@ -631,8 +707,8 @@ export interface CancelOrderOptions {
 export interface RefundDecidedData extends Order {
   refundDecision: {
     restaurantOrderId: string;
-    /** Why the refund was decided: a cancellation after the commitment deadline, or a late delivery. */
-    basis: "cancelled_after_commitment" | "late_delivery";
+    /** Why the refund was decided: a cancellation after the commitment deadline, a late delivery, or a reported delivery problem. */
+    basis: "cancelled_after_commitment" | "late_delivery" | "delivery_problem";
     percentage: number;
     amount: number;
     explanation: string;
@@ -654,7 +730,7 @@ export type WebhookEventType =
   | "catering.options_ready" | "catering.no_options" | "catering.failed"
   | "order.created" | "order.confirmed" | "order.payment_failed" | "order.expired"
   | "order.failed" | "order.needs_attention" | "order.cancelled" | "order.refunded"
-  | "order.refund_decided" | "order.delivered_late" | "order.delivery_updated"
+  | "order.refund_decided" | "order.delivered" | "order.delivered_late" | "order.delivery_updated"
   | "order.revised"
   | "ping";
 

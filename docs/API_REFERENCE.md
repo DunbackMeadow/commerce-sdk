@@ -375,6 +375,43 @@ threshold (60 minutes by default; Dunback may change it). You receive
 - Errors: `409 not_late`, `409 already_requested`, `409 request_window_closed`
   (30 days after delivery), `400 invalid_request`.
 
+### Deliveries: `order.deliveries`
+
+One entry per restaurant order: `status` (`pending`, `on_the_way`,
+`delivered`, `not_delivered`, `cancelled`), `deliveredAt`, `lateMinutes`,
+`deliveredBy` (`driver`, or `courier` for a courier company the restaurant
+booked, named in `courierCompany`), `timeRecordedBy` (`driver` or `courier`:
+Dunback's clock, with a photo and location; `restaurant`: entered by the
+restaurant from the courier's proof of delivery, so show that with the time),
+`hostConfirmedAt`, `problemReport`, `problemReportableUntil` (48 hours after
+delivery), and `canConfirm` / `canReportProblem`. You receive
+`order.delivered` when a delivery is recorded.
+
+### `POST /orders/:id/deliveries/confirm` `{ restaurantOrderId? }` → Order
+
+The host says the delivery arrived. Errors: `409 not_delivered`.
+
+### `POST /orders/:id/problem-reports` → 202
+
+```json
+{ "restaurantOrderId": "…", "type": "MISSING_ITEMS", "description": "Two of the five trays were missing.",
+  "wantsRefund": true, "photos": [{ "contentType": "image/jpeg", "data": "<base64>" }] }
+```
+
+- For 48 hours after a delivery. `type`: `MISSING_ITEMS`, `DAMAGED`,
+  `WRONG_ORDER`, `NO_SETUP`, `CONDUCT`, `LATE`, `NOT_RECEIVED`, `OTHER`.
+  `description`: 10 to 2000 characters. Up to 3 photos of 5 MB (JPEG, PNG,
+  WebP). Without `restaurantOrderId`, every reportable delivery of the order.
+- The restaurant is told at once. With `wantsRefund`, Dunback reviews the
+  report against its records of the delivery and decides the refund, from
+  nothing up to the restaurant's part of that delivery (Dunback's service fee
+  and commission are not refunded): `order.refund_decided` with basis
+  `delivery_problem` (a `LATE` report of a delivery recorded as late is the
+  late-delivery request, basis `late_delivery`).
+- Response: `{ object: "problem_report", orderId, reportedAt, reports: [{ restaurantOrderId, type, refundRequested, refundBasis, maximum }], order }`.
+- Errors: `409 not_delivered`, `409 already_reported`, `409 report_window_closed`,
+  `413 photo_too_large`, `415 invalid_photo`, `400 invalid_request`.
+
 ### Refunds
 
 | What happened | Refund | Webhook |
@@ -421,7 +458,8 @@ The `Dunback-Signature: t=<unix>,v1=<hex>` header is
 | --- | --- |
 | `catering.options_ready`, `catering.no_options`, `catering.failed` | CateringRequest |
 | `order.created`, `order.confirmed`, `order.payment_failed`, `order.expired`, `order.failed`, `order.needs_attention`, `order.cancelled`, `order.refunded`, `order.delivery_updated` | Order |
-| `order.refund_decided` | Order plus `refundDecision: { restaurantOrderId, basis, percentage, amount, explanation, refund }` |
+| `order.refund_decided` | Order plus `refundDecision: { restaurantOrderId, basis, percentage, amount, explanation, refund }`; `basis`: `cancelled_after_commitment`, `late_delivery` or `delivery_problem` |
+| `order.delivered` | Order plus `deliveredNow: [restaurantOrderId]` and `problemReportHours` (48) |
 | `order.delivered_late` | Order plus `lateDeliveries: [{ restaurantOrderId, lateMinutes }]` and `lateRefundPolicy` |
 | `ping` | `{ object: "ping", appId, message }`, plus top-level `livemode`. Sent by **Send test event** in the Developer Dashboard. |
 

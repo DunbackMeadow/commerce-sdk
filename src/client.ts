@@ -6,6 +6,8 @@ import type {
   RestaurantSummary,
   LateRefundRequest,
   LateRefundRequestInput,
+  ProblemReport,
+  ProblemReportInput,
   CateringRequestInput,
   Cuisine,
   CuisineCatalog,
@@ -243,6 +245,26 @@ export class DunbackClient {
      */
     requestRefund: (orderId: string, input: LateRefundRequestInput) =>
       this.request<LateRefundRequest>("POST", `/orders/${encodeURIComponent(orderId)}/refund-requests`, input),
+
+    /**
+     * The host confirms a delivery arrived (within 48 hours of it; see
+     * `order.deliveries[].canConfirm`). Without `restaurantOrderId`, every
+     * recorded delivery. Errors: 409 `not_delivered`.
+     */
+    confirmDelivery: (orderId: string, restaurantOrderId?: string) =>
+      this.request<Order>("POST", `/orders/${encodeURIComponent(orderId)}/deliveries/confirm`, restaurantOrderId ? { restaurantOrderId } : {}),
+
+    /**
+     * Reports a problem with a delivery (missing items, damaged food, no
+     * setup, the driver's or courier's conduct...), within 48 hours of it
+     * (`order.deliveries[].canReportProblem`), optionally with photos and a
+     * refund request. The restaurant is told at once; a refund is decided by
+     * Dunback (webhook `order.refund_decided`). Errors: 409 `not_delivered`,
+     * `already_reported`, `report_window_closed`; 413 `photo_too_large`;
+     * 415 `invalid_photo`.
+     */
+    reportProblem: (orderId: string, input: ProblemReportInput) =>
+      this.request<ProblemReport>("POST", `/orders/${encodeURIComponent(orderId)}/problem-reports`, input),
 
     /** Polls until the order leaves AWAITING_PAYMENT/PAID/FULFILLING. */
     waitForSettlement: async (orderId: string, { timeoutMs = 15 * 60_000, intervalMs = 5_000 } = {}) => {
